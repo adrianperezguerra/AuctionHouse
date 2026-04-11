@@ -392,7 +392,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (TOKEN) {
     // Verify token still valid
     try {
-      const r = await apiFetch("/auth/me");
+      const r = await apiFetch("/api/me");
       if (r.ok) {
         const d = await r.json();
         USERNAME = d.username; ROLE = d.role;
@@ -418,7 +418,7 @@ async function doLogin() {
 
   setLoading(btn, true);
   try {
-    const r = await fetch(API + "/auth/login", {
+    const r = await fetch(API + "/api/login", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({username:user, password:pass})
     });
