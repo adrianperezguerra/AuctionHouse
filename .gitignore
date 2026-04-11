@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.env
+.env.local
+users.db
+checkpoint.json
+*.log
+.DS_Storepython-version
