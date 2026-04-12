@@ -19,10 +19,7 @@ from flask_cors import CORS
 try:
     from auction_estimator import estimate_from_url, init_db as init_auction_db
     ESTIMATOR_AVAILABLE = True
-except Exception as e:
-    print(f"ESTIMATOR IMPORT ERROR: {e}")
-    import traceback
-    traceback.print_exc()
+except ImportError:
     ESTIMATOR_AVAILABLE = False
     def init_auction_db(): pass
 
