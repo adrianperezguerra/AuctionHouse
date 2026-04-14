@@ -372,7 +372,7 @@
 // ═══════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════
-const API = "RENDER_URL_PLACEHOLDER";
+const API = "https://auctionhouse-ht15.onrender.com";
 let TOKEN    = localStorage.getItem("ae_token")    || null;
 let USERNAME = localStorage.getItem("ae_username") || null;
 let ROLE     = localStorage.getItem("ae_role")     || null;
@@ -392,7 +392,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (TOKEN) {
     // Verify token still valid
     try {
-      const r = await apiFetch("/auth/me");
+      const r = await apiFetch("/api/me");
       if (r.ok) {
         const d = await r.json();
         USERNAME = d.username; ROLE = d.role;
@@ -418,7 +418,7 @@ async function doLogin() {
 
   setLoading(btn, true);
   try {
-    const r = await fetch(API + "/auth/login", {
+    const r = await fetch(API + "/api/login", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({username:user, password:pass})
     });
@@ -491,7 +491,7 @@ async function runEstimate() {
   setLoading(btn, true);
   btn.querySelector(".btn-text").textContent = "Analysing…";
   try {
-    const r = await apiFetch("/estimate", "POST", {url});
+    const r = await apiFetch("/api/estimate", "POST", {url});
     const d = await r.json();
     if (!r.ok) {
       if (r.status === 401) { doLogout(); return; }
@@ -561,7 +561,7 @@ async function loadUsers() {
   const tbody = document.getElementById("user-tbody");
   tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:32px;color:#9a8e80;font-style:italic;font-family:var(--mono);font-size:0.75rem">Loading…</td></tr>`;
   try {
-    const r = await apiFetch("/admin/users");
+    const r = await apiFetch("/api/users");
     if (!r.ok) { if (r.status===401) doLogout(); return; }
     const users = await r.json();
     if (!users.length) {
@@ -610,7 +610,7 @@ async function createUser() {
 
   setLoading(btn, true);
   try {
-    const r = await apiFetch("/admin/users", "POST", {username:un, password:pw});
+    const r = await apiFetch("/api/users", "POST", {username:un, password:pw});
     const d = await r.json();
     if (!r.ok) { showMsg(err, d.error || "Failed to create user."); return; }
     closeModal("modal-create");
@@ -644,7 +644,7 @@ async function resetPassword() {
 
   setLoading(btn, true);
   try {
-    const r = await apiFetch(`/admin/users/${pendingResetId}/password`, "PATCH", {password:pw});
+    const r = await apiFetch(`/api/users/${pendingResetId}/password`, "PATCH", {password:pw});
     const d = await r.json();
     if (!r.ok) { showMsg(err, d.error || "Failed."); return; }
     closeModal("modal-reset");
@@ -673,7 +673,7 @@ async function deleteUser() {
 
   setLoading(btn, true);
   try {
-    const r = await apiFetch(`/admin/users/${pendingDeleteId}`, "DELETE");
+    const r = await apiFetch(`/api/users/${pendingDeleteId}`, "DELETE");
     const d = await r.json();
     if (!r.ok) { showMsg(err, d.error || "Failed to delete."); return; }
     closeModal("modal-delete");
