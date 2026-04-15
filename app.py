@@ -228,6 +228,71 @@ def estimate():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/estimate-manual", methods=["POST"])
+@require_auth
+def estimate_manual():
+    if not ESTIMATOR_AVAILABLE:
+        return jsonify({"error": "Estimator not set up yet."}), 503
+    d = request.get_json(force=True) or {}
+
+    artist_name       = (d.get("artist_name") or "").strip()
+    artist_wiki_title = (d.get("artist_wiki_title") or "").strip() or None
+    if not artist_name:
+        return jsonify({"error": "artist_name is required."}), 400
+
+    try:
+        from auction_estimator import (
+            lookup_artist_in_db, score_artist_live, predict_price,
+            normalise_medium, is_3d_medium
+        )
+
+        artist = lookup_artist_in_db(artist_name, artist_wiki_title)
+        if artist is None:
+            artist = score_artist_live(artist_name, artist_wiki_title)
+
+        medium    = normalise_medium(d.get("medium") or "unknown")
+        width_cm  = d.get("width_cm")
+        height_cm = d.get("height_cm")
+        depth_cm  = d.get("depth_cm")
+        decade    = d.get("decade")
+
+        result = predict_price(
+            artist_score = artist["score"],
+            decade       = decade,
+            medium       = medium,
+            width_cm     = width_cm,
+            height_cm    = height_cm,
+            depth_cm     = depth_cm,
+        )
+
+        return jsonify({
+            "artwork": {
+                "title":    d.get("title") or "Untitled",
+                "url":      None,
+                "artist":   artist["name"],
+                "decade":   decade,
+                "medium":   medium,
+                "width_cm": width_cm,
+                "height_cm":height_cm,
+                "depth_cm": depth_cm,
+                "is_3d":    bool(is_3d_medium(medium) or depth_cm),
+            },
+            "artist_score":        artist["score"],
+            "estimated_price_usd": result["estimated_price_usd"],
+            "confidence_interval": result["confidence_interval"],
+            "model_info": {
+                "score_band":         result["score_band"],
+                "model_band":         result["model_band"],
+                "n_training_samples": result["n_training_samples"],
+                "model_r2":           result["model_r2"],
+                "model_mae_usd":      result["model_mae_usd"],
+            }
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
