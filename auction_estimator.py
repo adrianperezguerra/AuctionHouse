@@ -83,10 +83,10 @@ W_PRICE       = 0.48
 W_WIKI_LENGTH = 0.12
 
 # Regression weights
-W_SEARCH_VOL   = 0.38   # Wikipedia pageviews proxy
-W_NUM_WORKS    = 0.37
-W_AVG_PRICE    = 0.13
-W_WIKI_LEN     = 0.12
+W_SEARCH_VOL   = 0.20   # Wikipedia pageviews proxy
+W_NUM_WORKS    = 0.20
+W_AVG_PRICE    = 0.50
+W_WIKI_LEN     = 0.10
 
 MIN_SAMPLES_TO_TRAIN = 30
 
