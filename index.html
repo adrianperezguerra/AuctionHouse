@@ -577,8 +577,8 @@ function setMode(mode) {
   document.getElementById("mode-manual").style.display = mode === "manual" ? "block" : "none";
   const activeStyle   = "background:var(--ink);color:var(--parchment)";
   const inactiveStyle = "background:var(--parchment);color:#9a8e80";
-  document.getElementById("tab-wiki").style.cssText   = (mode === "wiki"   ? activeStyle : inactiveStyle);
-  document.getElementById("tab-manual").style.cssText = (mode === "manual" ? activeStyle : inactiveStyle);
+  document.getElementById("tab-wiki").style.background   = mode === "wiki"   ? "var(--ink)" : "var(--parchment)"; document.getElementById("tab-wiki").style.color   = mode === "wiki"   ? "var(--parchment)" : "#9a8e80";
+  document.getElementById("tab-manual").style.background = mode === "manual" ? "var(--ink)" : "var(--parchment)"; document.getElementById("tab-manual").style.color = mode === "manual" ? "var(--parchment)" : "#9a8e80";
 }
 
 async function runEstimate() {
