@@ -77,9 +77,9 @@ WIKI_API        = "https://en.wikipedia.org/w/api.php"
 HEADERS = {"User-Agent": "ArtworkAuctionEstimator/2.0 (research; contact@example.com)"}
 
 # Score weights for artist fame (must sum to 1.0)
-W_PAGEVIEWS   = 0.38
-W_WORKS       = 0.37
-W_PRICE       = 0.13
+W_PAGEVIEWS   = 0.20
+W_WORKS       = 0.20
+W_PRICE       = 0.48
 W_WIKI_LENGTH = 0.12
 
 # Regression weights
@@ -541,7 +541,7 @@ def build_pipeline() -> Pipeline:
         ("bin", "passthrough", BINARY_FEATURES),
         ("cat", cat_pipe,      CAT_FEATURES),
     ])
-    return Pipeline([("prep", preprocessor), ("model", Ridge(alpha=1.0))])
+    return Pipeline([("prep", preprocessor), ("model", Ridge(alpha=10.0))])
 
 
 def train_all_models():
