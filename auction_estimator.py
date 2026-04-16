@@ -77,16 +77,16 @@ WIKI_API        = "https://en.wikipedia.org/w/api.php"
 HEADERS = {"User-Agent": "ArtworkAuctionEstimator/2.0 (research; contact@example.com)"}
 
 # Score weights for artist fame (must sum to 1.0)
-W_PAGEVIEWS   = 0.20
-W_WORKS       = 0.20
-W_PRICE       = 0.48
+W_PAGEVIEWS   = 0.38
+W_WORKS       = 0.37
+W_PRICE       = 0.13
 W_WIKI_LENGTH = 0.12
 
 # Regression weights
-W_SEARCH_VOL   = 0.20   # Wikipedia pageviews proxy
-W_NUM_WORKS    = 0.20
-W_AVG_PRICE    = 0.50
-W_WIKI_LEN     = 0.10
+W_SEARCH_VOL   = 0.38   # Wikipedia pageviews proxy
+W_NUM_WORKS    = 0.37
+W_AVG_PRICE    = 0.13
+W_WIKI_LEN     = 0.12
 
 MIN_SAMPLES_TO_TRAIN = 30
 
@@ -541,7 +541,7 @@ def build_pipeline() -> Pipeline:
         ("bin", "passthrough", BINARY_FEATURES),
         ("cat", cat_pipe,      CAT_FEATURES),
     ])
-    return Pipeline([("prep", preprocessor), ("model", Ridge(alpha=10.0))])
+    return Pipeline([("prep", preprocessor), ("model", Ridge(alpha=1.0))])
 
 
 def train_all_models():
@@ -880,6 +880,24 @@ def predict_price(
 # MAIN ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def check_museum_class(title: str) -> Optional[dict]:
+    """Check if an artwork is museum-class by title match. Returns row or None."""
+    if not title:
+        return None
+    conn = get_conn()
+    row = conn.execute("""
+        SELECT aw.title, aw.insurance_value_usd, aw.museum_name,
+               ar.name as artist_name, aw.decade, aw.medium_raw
+        FROM artworks aw
+        JOIN artists ar ON ar.id = aw.artist_id
+        WHERE aw.museum_class = 1
+          AND lower(aw.title) LIKE lower(?)
+        LIMIT 1
+    """, (f"%{title[:30]}%",)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def estimate_from_url(url: str) -> dict:
     """Full pipeline: Wikipedia URL → auction price estimate."""
 
@@ -887,7 +905,38 @@ def estimate_from_url(url: str) -> dict:
     artwork = parse_wikipedia_artwork(url)
     log.info(f"Parsed artwork: '{artwork['title']}' by '{artwork['artist_name']}'")
 
-    # 2. Look up or score artist
+    # 2. Check museum class before doing anything else
+    museum_row = check_museum_class(artwork["title"])
+    if museum_row and museum_row["insurance_value_usd"]:
+        ins = museum_row["insurance_value_usd"]
+        log.info(f"Museum-class work detected: '{artwork['title']}' — returning insurance valuation")
+        return {
+            "artwork": {
+                "title":    artwork["title"],
+                "url":      url,
+                "artist":   museum_row["artist_name"],
+                "decade":   artwork["decade"],
+                "medium":   artwork["medium"],
+                "width_cm": artwork["width_cm"],
+                "height_cm":artwork["height_cm"],
+                "depth_cm": artwork["depth_cm"],
+                "is_3d":    False,
+            },
+            "artist_score":        10.0,
+            "estimated_price_usd": ins,
+            "confidence_interval": [ins * 0.7, ins * 1.5],
+            "museum_class":        True,
+            "museum_name":         museum_row["museum_name"],
+            "model_info": {
+                "score_band":         9,
+                "model_band":         9,
+                "n_training_samples": None,
+                "model_r2":           None,
+                "model_mae_usd":      None,
+            }
+        }
+
+    # 3. Look up or score artist
     artist = lookup_artist_in_db(artwork["artist_name"], artwork["artist_wiki_title"])
     if artist is None:
         artist = score_artist_live(
@@ -896,7 +945,7 @@ def estimate_from_url(url: str) -> dict:
             artwork.get("wikidata_qid"),
         )
 
-    # 3. Predict
+    # 4. Predict
     result = predict_price(
         artist_score = artist["score"],
         decade       = artwork["decade"],
@@ -906,7 +955,7 @@ def estimate_from_url(url: str) -> dict:
         depth_cm     = artwork["depth_cm"],
     )
 
-    # 4. Assemble full output
+    # 5. Assemble full output
     return {
         "artwork": {
             "title":    artwork["title"],
@@ -919,6 +968,8 @@ def estimate_from_url(url: str) -> dict:
             "depth_cm": artwork["depth_cm"],
             "is_3d":    bool(result.get("score_band") and is_3d_medium(artwork["medium"])),
         },
+        "museum_class":         False,
+        "museum_name":          None,
         "artist_score":         artist["score"],
         "estimated_price_usd":  result["estimated_price_usd"],
         "confidence_interval":  result["confidence_interval"],
