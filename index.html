@@ -244,16 +244,104 @@
     </header>
 
     <div class="card">
-      <label for="wiki-url">Wikipedia Article URL</label>
-      <div class="input-row">
-        <input type="text" id="wiki-url"
-          placeholder="https://en.wikipedia.org/wiki/The_Starry_Night"
-          autocomplete="off" spellcheck="false" />
-        <button class="btn btn-primary" id="estimate-btn" onclick="runEstimate()">
-          <span class="spinner-el"></span>
-          <span class="btn-text">Estimate</span>
+      <!-- Mode toggle -->
+      <div style="display:flex;gap:0;margin-bottom:28px;border:1px solid var(--dust);border-radius:1px;overflow:hidden">
+        <button id="tab-wiki" onclick="setMode('wiki')"
+          style="flex:1;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.14em;text-transform:uppercase;padding:10px;border:none;cursor:pointer;transition:background 0.2s,color 0.2s;background:var(--ink);color:var(--parchment)">
+          Wikipedia URL
+        </button>
+        <button id="tab-manual" onclick="setMode('manual')"
+          style="flex:1;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.14em;text-transform:uppercase;padding:10px;border:none;cursor:pointer;transition:background 0.2s,color 0.2s;background:var(--parchment);color:#9a8e80">
+          Manual Entry
         </button>
       </div>
+
+      <!-- Wikipedia mode -->
+      <div id="mode-wiki">
+        <div class="field">
+          <label for="wiki-url">Wikipedia Article URL</label>
+          <div class="input-row">
+            <input type="text" id="wiki-url"
+              placeholder="https://en.wikipedia.org/wiki/The_Starry_Night"
+              autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Manual mode -->
+      <div id="mode-manual" style="display:none">
+        <div class="field">
+          <label for="m-title">Artwork Title</label>
+          <input type="text" id="m-title" placeholder="e.g. Portrait of Dr. Gachet" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="m-artist">Artist Name</label>
+          <input type="text" id="m-artist" placeholder="e.g. Vincent van Gogh" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="m-artist-wiki">Artist Wikipedia URL <span style="font-family:var(--mono);font-size:0.55rem;color:#9a8e80;text-transform:none;letter-spacing:0">(optional — improves score accuracy)</span></label>
+          <input type="text" id="m-artist-wiki" placeholder="https://en.wikipedia.org/wiki/Vincent_van_Gogh" autocomplete="off" spellcheck="false" />
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="field">
+            <label for="m-decade">Decade Created</label>
+            <input type="text" id="m-decade" placeholder="e.g. 1880" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="m-medium">Medium</label>
+            <select id="m-medium">
+              <option value="unknown">Unknown</option>
+              <option value="oil on canvas">Oil on canvas</option>
+              <option value="oil on panel">Oil on panel</option>
+              <option value="oil on paper">Oil on paper</option>
+              <option value="acrylic">Acrylic</option>
+              <option value="watercolor">Watercolor</option>
+              <option value="gouache">Gouache</option>
+              <option value="tempera">Tempera</option>
+              <option value="fresco">Fresco</option>
+              <option value="pastel">Pastel</option>
+              <option value="charcoal">Charcoal</option>
+              <option value="pencil">Pencil</option>
+              <option value="ink">Ink</option>
+              <option value="mixed media">Mixed media</option>
+              <option value="collage">Collage</option>
+              <option value="photograph">Photograph</option>
+              <option value="print">Print</option>
+              <option value="engraving">Engraving</option>
+              <option value="etching">Etching</option>
+              <option value="lithograph">Lithograph</option>
+              <option value="screenprint">Screenprint</option>
+              <option value="bronze">Bronze</option>
+              <option value="marble">Marble</option>
+              <option value="terracotta">Terracotta</option>
+              <option value="ceramic">Ceramic</option>
+              <option value="carved wood">Carved wood</option>
+              <option value="stone">Stone</option>
+              <option value="steel">Steel</option>
+              <option value="resin">Resin</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div class="field">
+            <label for="m-width">Width (cm)</label>
+            <input type="text" id="m-width" placeholder="e.g. 73.7" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="m-height">Height (cm)</label>
+            <input type="text" id="m-height" placeholder="e.g. 92.1" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="m-depth">Depth (cm)</label>
+            <input type="text" id="m-depth" placeholder="3D only" autocomplete="off" />
+          </div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary btn-full" id="estimate-btn" onclick="runEstimate()" style="margin-top:8px">
+        <span class="spinner-el"></span>
+        <span class="btn-text">Estimate</span>
+      </button>
       <div class="msg msg-error" id="estimate-err"></div>
     </div>
 
@@ -388,6 +476,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById(id).addEventListener("keydown", e => { if (e.key==="Enter") doLogin(); })
   );
   document.getElementById("wiki-url").addEventListener("keydown", e => { if (e.key==="Enter") runEstimate(); });
+  ["m-title","m-artist","m-artist-wiki","m-decade","m-width","m-height","m-depth"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("keydown", e => { if (e.key==="Enter") runEstimate(); });
+  });
 
   if (TOKEN) {
     // Verify token still valid
@@ -477,21 +569,60 @@ function showView(name) {
 // ═══════════════════════════════════════════════════
 // ESTIMATOR
 // ═══════════════════════════════════════════════════
+let currentMode = "wiki";
+
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById("mode-wiki").style.display   = mode === "wiki"   ? "block" : "none";
+  document.getElementById("mode-manual").style.display = mode === "manual" ? "block" : "none";
+  const activeStyle   = "background:var(--ink);color:var(--parchment)";
+  const inactiveStyle = "background:var(--parchment);color:#9a8e80";
+  document.getElementById("tab-wiki").style.cssText   = (mode === "wiki"   ? activeStyle : inactiveStyle);
+  document.getElementById("tab-manual").style.cssText = (mode === "manual" ? activeStyle : inactiveStyle);
+}
+
 async function runEstimate() {
-  const url = document.getElementById("wiki-url").value.trim();
   const btn = document.getElementById("estimate-btn");
   const err = document.getElementById("estimate-err");
   err.className = "msg msg-error";
   document.getElementById("result").className = "";
   document.getElementById("divider").className = "divider";
 
-  if (!url) { showMsg(err, "Please paste a Wikipedia URL."); return; }
-  if (!url.includes("wikipedia.org/wiki/")) { showMsg(err, "That doesn't look like a Wikipedia article URL."); return; }
+  let endpoint, payload;
+
+  if (currentMode === "wiki") {
+    const url = document.getElementById("wiki-url").value.trim();
+    if (!url) { showMsg(err, "Please paste a Wikipedia URL."); return; }
+    if (!url.includes("wikipedia.org/wiki/")) { showMsg(err, "That doesn't look like a Wikipedia article URL."); return; }
+    endpoint = "/api/estimate";
+    payload  = {url};
+  } else {
+    const artist = document.getElementById("m-artist").value.trim();
+    if (!artist) { showMsg(err, "Artist name is required."); return; }
+    const decadeRaw = document.getElementById("m-decade").value.trim();
+    const decade = decadeRaw ? parseInt(decadeRaw) : null;
+    if (decadeRaw && isNaN(decade)) { showMsg(err, "Decade must be a number e.g. 1880."); return; }
+    const artistWiki = document.getElementById("m-artist-wiki").value.trim();
+    const artistWikiTitle = artistWiki.includes("wikipedia.org/wiki/")
+      ? decodeURIComponent(artistWiki.split("/wiki/")[1]).replace(/_/g, " ")
+      : null;
+    endpoint = "/api/estimate-manual";
+    payload  = {
+      title:            document.getElementById("m-title").value.trim() || "Untitled",
+      artist_name:      artist,
+      artist_wiki_title: artistWikiTitle,
+      decade:           decade,
+      medium:           document.getElementById("m-medium").value,
+      width_cm:         parseFloat(document.getElementById("m-width").value)  || null,
+      height_cm:        parseFloat(document.getElementById("m-height").value) || null,
+      depth_cm:         parseFloat(document.getElementById("m-depth").value)  || null,
+    };
+  }
 
   setLoading(btn, true);
   btn.querySelector(".btn-text").textContent = "Analysing…";
   try {
-    const r = await apiFetch("/api/estimate", "POST", {url});
+    const r = await apiFetch(endpoint, "POST", payload);
     const d = await r.json();
     if (!r.ok) {
       if (r.status === 401) { doLogout(); return; }
@@ -518,16 +649,9 @@ function renderResult(d) {
   const sv  = d.artist_score || 0;
   const pct = ((sv - 1) / 9 * 100).toFixed(1);
 
-  const museumBanner = d.museum_class ? `
-    <div style="background:#fef9ec;border:1px solid #f5d9a0;border-radius:1px;padding:14px 18px;margin-bottom:28px;font-size:0.85rem;font-style:italic;color:#7a5c1e">
-      ◆ &nbsp;This work is permanently held by <strong>${d.museum_name}</strong> and has never sold at auction.
-      This figure is an estimated insurance valuation, not an auction hammer price.
-    </div>` : "";
-
   document.getElementById("result").innerHTML = `
-    ${museumBanner}
     <div class="price-hero">
-      <div class="price-label">${d.museum_class ? "Estimated Insurance Valuation" : "Estimated Auction Price"}</div>
+      <div class="price-label">Estimated Auction Price</div>
       <div class="price-value">${fmt(d.estimated_price_usd)}</div>
       <div class="price-range">Range &nbsp;${fmt(lo)} — ${fmt(hi)}</div>
     </div>
@@ -548,13 +672,11 @@ function renderResult(d) {
       <div class="data-cell"><div class="cell-label">Dimensions</div><div class="cell-value">${dims}</div></div>
     </div>
     <div class="model-meta">
-      ${d.museum_class
-        ? `insurance valuation &nbsp;·&nbsp; <span>permanently held, never auctioned</span>`
-        : `model band <span>${mi.score_band}</span> &nbsp;·&nbsp;
-           trained on <span>${(mi.n_training_samples||0).toLocaleString()}</span> works &nbsp;·&nbsp;
-           R² <span>${(mi.model_r2||0).toFixed(3)}</span> &nbsp;·&nbsp;
-           MAE <span>${fmt(mi.model_mae_usd)}</span>`
-      }</div>`;
+      model band <span>${mi.score_band}</span> &nbsp;·&nbsp;
+      trained on <span>${(mi.n_training_samples||0).toLocaleString()}</span> works &nbsp;·&nbsp;
+      R² <span>${(mi.model_r2||0).toFixed(3)}</span> &nbsp;·&nbsp;
+      MAE <span>${fmt(mi.model_mae_usd)}</span>
+    </div>`;
 
   document.getElementById("divider").classList.add("visible");
   requestAnimationFrame(() => {
