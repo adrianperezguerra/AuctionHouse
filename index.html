@@ -491,7 +491,7 @@ async function runEstimate() {
   setLoading(btn, true);
   btn.querySelector(".btn-text").textContent = "Analysing…";
   try {
-    const r = await apiFetch("/estimate", "POST", {url});
+    const r = await apiFetch("/api/estimate", "POST", {url});
     const d = await r.json();
     if (!r.ok) {
       if (r.status === 401) { doLogout(); return; }
