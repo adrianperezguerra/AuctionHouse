@@ -866,7 +866,7 @@ def predict_price(
 
     # Apply artist score multiplier — exponential boost for high-fame artists
     # Score 10 -> 6x, Score 9 -> 3x, Score 8 -> 1.5x, Score 5 -> 1x, below 5 -> discount
-    score_multiplier = math.exp((artist_score - 5.0) * 0.45)
+    score_multiplier = math.exp((artist_score - 5.0) * 0.18)
     price = price * score_multiplier
     mae      = meta["mae_usd"] or 0
 
