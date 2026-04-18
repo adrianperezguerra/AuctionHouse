@@ -863,6 +863,11 @@ def predict_price(
     log_pred = float(pipeline.predict(row)[0])
     log_pred = max(log_pred, 0)
     price    = float(np.expm1(log_pred))
+
+    # Apply artist score multiplier — exponential boost for high-fame artists
+    # Score 10 -> 6x, Score 9 -> 3x, Score 8 -> 1.5x, Score 5 -> 1x, below 5 -> discount
+    score_multiplier = math.exp((artist_score - 5.0) * 0.45)
+    price = price * score_multiplier
     mae      = meta["mae_usd"] or 0
 
     return {
