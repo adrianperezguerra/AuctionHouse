@@ -825,6 +825,68 @@ def find_nearest_model_band(target: int) -> Optional[int]:
     return min(trained, key=lambda b: abs(b - target)) if trained else None
 
 
+def get_artist_median_price(artist_id: int) -> Optional[float]:
+    """Get median sale price for a specific artist from DB."""
+    if not artist_id:
+        return None
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT sale_price_usd FROM artworks WHERE artist_id=? AND sale_price_usd > 0 ORDER BY sale_price_usd",
+        (artist_id,)
+    ).fetchall()
+    conn.close()
+    prices = [r[0] for r in rows]
+    if len(prices) < 1:
+        return None
+    mid = len(prices) // 2
+    if len(prices) % 2 == 0:
+        return (prices[mid - 1] + prices[mid]) / 2
+    return prices[mid]
+
+
+def apply_artwork_adjustments(base_price: float, decade, medium: str,
+                               width_cm, height_cm, depth_cm) -> float:
+    """Adjust a base price for medium, size, and age."""
+    price = base_price
+
+    # Medium multiplier
+    medium_multipliers = {
+        "oil on canvas": 1.2,
+        "oil on panel": 1.15,
+        "watercolor": 0.6,
+        "pencil": 0.4,
+        "charcoal": 0.4,
+        "print": 0.3,
+        "lithograph": 0.3,
+        "screenprint": 0.3,
+        "photograph": 0.35,
+        "bronze": 0.9,
+        "marble": 1.1,
+    }
+    m = medium.lower().strip() if medium else "unknown"
+    price *= medium_multipliers.get(m, 1.0)
+
+    # Size multiplier (only for 2D works) — very conservative
+    if width_cm and height_cm and not is_3d_medium(m):
+        area = width_cm * height_cm
+        # Reference area: 73x92cm = 6716 sq cm (typical medium canvas)
+        size_factor = math.sqrt(area / 6716)
+        size_factor = max(0.5, min(1.5, size_factor))  # tight cap: never more than 1.5x
+        price *= size_factor
+
+    # Decade adjustment — older works slight premium
+    if decade:
+        age = 2024 - decade
+        if age > 200:
+            price *= 1.3
+        elif age > 100:
+            price *= 1.15
+        elif age < 30:
+            price *= 0.9
+
+    return price
+
+
 def predict_price(
     artist_score: float,
     decade: Optional[int],
@@ -832,7 +894,32 @@ def predict_price(
     width_cm: Optional[float],
     height_cm: Optional[float],
     depth_cm: Optional[float],
+    artist_id: Optional[int] = None,
 ) -> dict:
+    # Try artist-level median prediction first
+    median_price = get_artist_median_price(artist_id)
+    if median_price is not None:
+        adjusted = apply_artwork_adjustments(median_price, decade, medium or "unknown", width_cm, height_cm, depth_cm)
+        score_multiplier = math.exp(min((artist_score - 5.0) * 0.18, 2.0)) 
+        adjusted = min(adjusted * score_multiplier, 5_000_000_000)  # hard cap at $5B
+        mae = adjusted * 0.4  # 40% confidence interval for median-based prediction
+        band = max(1, min(9, int(artist_score)))
+        conn = get_conn()
+        meta = conn.execute(
+            "SELECT n_samples, r2_score, mae_usd FROM regression_models WHERE score_band=?",
+            (band,)
+        ).fetchone()
+        conn.close()
+        return {
+            "estimated_price_usd":  round(adjusted, 2),
+            "confidence_interval":  (round(max(0, adjusted - mae), 2), round(adjusted + mae, 2)),
+            "score_band":           band,
+            "model_band":           band,
+            "n_training_samples":   meta["n_samples"] if meta else 0,
+            "model_r2":             meta["r2_score"] if meta else 0,
+            "model_mae_usd":        round(mae, 2),
+        }
+
     band = max(1, min(9, int(artist_score)))
     entry = load_model(band)
     model_band = band
@@ -958,6 +1045,7 @@ def estimate_from_url(url: str) -> dict:
         width_cm     = artwork["width_cm"],
         height_cm    = artwork["height_cm"],
         depth_cm     = artwork["depth_cm"],
+        artist_id    = artist.get("id"),
     )
 
     # 5. Assemble full output
