@@ -231,7 +231,49 @@ min-width:0;box-sizing:border-box;
       .user-table th:nth-child(3), .user-table td:nth-child(3),
       .user-table th:nth-child(4), .user-table td:nth-child(4) { display: none; }
     }
-  </style>
+  
+.monte-wrap {
+    margin-top: 32px;
+    padding-top: 28px;
+    border-top: 1px solid var(--dust);
+}
+.monte-title {
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 16px;
+}
+.monte-canvas-wrap {
+    position: relative;
+    width: 100%;
+    height: 160px;
+}
+.monte-tooltip {
+    position: absolute;
+    background: var(--ink);
+    color: var(--parchment);
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    padding: 6px 12px;
+    border-radius: 2px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+    transform: translateX(-50%);
+    z-index: 10;
+}
+.monte-axis {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    font-family: var(--mono);
+    font-size: 0.55rem;
+    color: #9a8e80;
+}
+</style>
 </head>
 <body>
 
@@ -695,6 +737,17 @@ function renderResult(d) {
     </div>`;
 
   document.getElementById("divider").classList.add("visible");
+    // Append Monte Carlo chart
+    const monteHtml = `
+        <div class="monte-wrap">
+            <div class="monte-title">Monte Carlo Price Distribution — 10,000 Simulations</div>
+            <div class="monte-canvas-wrap" id="monte-canvas-wrap">
+                <div class="monte-tooltip" id="monte-tooltip"></div>
+            </div>
+            <div class="monte-axis" id="monte-axis"></div>
+        </div>
+    `;
+    document.getElementById("result").innerHTML += monteHtml;
   requestAnimationFrame(() => {
     document.getElementById("result").classList.add("visible");
     
@@ -895,6 +948,121 @@ function updateGridFade() {
     wrap.classList.toggle("fade-bottom", grid.scrollTop + grid.clientHeight < grid.scrollHeight - 10);
 }
 document.addEventListener("scroll", updateGridFade);
+
+
+function runMonteCarlo(estimate, mae) {
+    const N = 10000;
+    const sigma = Math.log(1 + mae / estimate);
+    const mu = Math.log(estimate) - 0.5 * sigma * sigma;
+
+    // Generate samples
+    const samples = [];
+    for (let i = 0; i < N; i++) {
+        // Box-Muller transform
+        const u1 = Math.random(), u2 = Math.random();
+        const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+        samples.push(Math.exp(mu + sigma * z));
+    }
+    samples.sort((a, b) => a - b);
+
+    // Build histogram
+    const minVal = samples[Math.floor(N * 0.01)];
+    const maxVal = samples[Math.floor(N * 0.99)];
+    const BINS = 60;
+    const binSize = (maxVal - minVal) / BINS;
+    const bins = new Array(BINS).fill(0);
+    for (const s of samples) {
+        if (s < minVal || s > maxVal) continue;
+        const idx = Math.min(Math.floor((s - minVal) / binSize), BINS - 1);
+        bins[idx]++;
+    }
+    const maxBin = Math.max(...bins);
+
+    // Draw canvas
+    const wrap = document.getElementById("monte-canvas-wrap");
+    wrap.innerHTML = "";
+    const canvas = document.createElement("canvas");
+    const W = wrap.clientWidth || 680;
+    const H = 140;
+    canvas.width = W;
+    canvas.height = H;
+    canvas.style.width = "100%";
+    canvas.style.height = H + "px";
+    wrap.appendChild(canvas);
+    const ctx = canvas.getContext("2d");
+
+    // Draw bars with gradient color orange->red->purple
+    const colors = bins.map((b, i) => {
+        const t = b / maxBin; // 0=tail, 1=peak
+        if (t < 0.4) {
+            // orange to red
+            const s = t / 0.4;
+            const r = Math.round(220 + (180 - 220) * s);
+            const g = Math.round(100 + (40 - 100) * s);
+            const bl = Math.round(30 + (40 - 30) * s);
+            return `rgb(${r},${g},${bl})`;
+        } else {
+            // red to purple
+            const s = (t - 0.4) / 0.6;
+            const r = Math.round(180 + (100 - 180) * s);
+            const g = Math.round(40 + (30 - 40) * s);
+            const bl = Math.round(40 + (160 - 40) * s);
+            return `rgb(${r},${g},${bl})`;
+        }
+    });
+
+    const barW = W / BINS;
+    for (let i = 0; i < BINS; i++) {
+        const h = (bins[i] / maxBin) * (H - 20);
+        ctx.fillStyle = colors[i];
+        ctx.beginPath();
+        ctx.roundRect(i * barW + 1, H - h - 4, barW - 2, h, [2, 2, 0, 0]);
+        ctx.fill();
+    }
+
+    // Draw estimate line
+    const estX = ((estimate - minVal) / (maxVal - minVal)) * W;
+    if (estX > 0 && estX < W) {
+        ctx.strokeStyle = "rgba(184,146,42,0.8)";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(estX, 0);
+        ctx.lineTo(estX, H);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // Axis labels
+    const axisEl = document.getElementById("monte-axis");
+    const p10 = samples[Math.floor(N * 0.10)];
+    const p50 = samples[Math.floor(N * 0.50)];
+    const p90 = samples[Math.floor(N * 0.90)];
+    axisEl.innerHTML = `
+        <span>${fmt(minVal)}</span>
+        <span>p10 ${fmt(p10)}</span>
+        <span>p50 ${fmt(p50)}</span>
+        <span>p90 ${fmt(p90)}</span>
+        <span>${fmt(maxVal)}</span>
+    `;
+
+    // Tooltip on hover
+    const tooltip = document.getElementById("monte-tooltip");
+    canvas.addEventListener("mousemove", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) * (W / rect.width);
+        const binIdx = Math.min(Math.floor(x / barW), BINS - 1);
+        const price = minVal + (binIdx + 0.5) * binSize;
+        const pct = ((bins[binIdx] / N) * 100).toFixed(2);
+        tooltip.style.opacity = "1";
+        tooltip.style.left = e.clientX - rect.left + "px";
+        tooltip.style.top = "0px";
+        tooltip.textContent = `${fmt(price)}  —  ${pct}% of simulations`;
+    });
+    canvas.addEventListener("mouseleave", () => {
+        tooltip.style.opacity = "0";
+    });
+}
 
 </script>
 </body>
