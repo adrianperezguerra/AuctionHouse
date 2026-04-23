@@ -664,13 +664,7 @@ function renderResult(d) {
     <div class="data-grid">
       <div class="data-cell full"><div class="cell-label">Title</div><div class="cell-value italic">${esc(a.title)||"—"}</div></div>
       <div class="data-cell"><div class="cell-label">Artist</div><div class="cell-value">${esc(a.artist)||"—"}</div></div>
-      <div class="data-cell">
-        <div class="cell-label">Artist Fame Score</div>
-        <div class="cell-value">
-          <div class="score-badge">
-            <div class="score-number">${sv.toFixed(1)}</div>
-            <div class="score-bar-wrap"><div class="score-bar-fill" id="score-bar" style="width:0%"></div></div>
-          </div>
+      
         </div>
       </div>
       <div class="data-cell"><div class="cell-label">Decade Created</div><div class="cell-value">${a.decade ? a.decade+"s" : "—"}</div></div>
