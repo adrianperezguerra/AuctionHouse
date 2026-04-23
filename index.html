@@ -132,9 +132,9 @@
     .price-label { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold); margin-bottom: 8px; }
     .price-value { font-size: clamp(2.8rem, 8vw, 4.8rem); font-weight: 300; letter-spacing: -0.02em; line-height: 1; }
     .price-range { margin-top: 10px; font-family: var(--mono); font-size: 0.7rem; color: #9a8e80; }
-    .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--dust); border: 1px solid var(--dust); margin-bottom: 32px; }
-    .data-cell { background: #fff; padding: 20px 24px; }
-    .data-cell.full { grid-column: 1 / -1; }
+    .data-grid { display: flex; flex-direction: column; gap: 1px; background: var(--dust); border: 1px solid var(--dust); margin-bottom: 32px; }
+    .data-cell { background: #fff; padding: 20px 24px; text-align: center; }
+    .data-cell.full { }
     .cell-label { font-family: var(--mono); font-size: 0.58rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); margin-bottom: 5px; }
     .cell-value { font-size: 1.05rem; font-weight: 400; line-height: 1.3; }
     .cell-value.italic { font-style: italic; }
@@ -193,6 +193,31 @@ min-width:0;box-sizing:border-box;
 .tab-active { background:var(--ink) !important;color:var(--parchment) !important; }
 .tab-inactive { background:var(--parchment) !important;color:#9a8e80 !important; }
 .tab-inactive:hover { background:var(--dust) !important;color:var(--ink) !important; }
+.data-grid-wrap {
+    position: relative;
+    margin-bottom: 32px;
+}
+.data-grid-wrap::before,
+.data-grid-wrap::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0;
+    height: 40px;
+    pointer-events: none;
+    z-index: 2;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+.data-grid-wrap::before {
+    top: 0;
+    background: linear-gradient(to bottom, rgba(245,240,232,0.9), transparent);
+}
+.data-grid-wrap::after {
+    bottom: 0;
+    background: linear-gradient(to top, rgba(245,240,232,0.9), transparent);
+}
+.data-grid-wrap.fade-top::before { opacity: 1; }
+.data-grid-wrap.fade-bottom::after { opacity: 1; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes spin   { to { transform: rotate(360deg); } }
 
@@ -669,12 +694,6 @@ function renderResult(d) {
       <div class="data-cell"><div class="cell-label">Decade Created</div><div class="cell-value">${a.decade ? a.decade+"s" : "—"}</div></div>
       <div class="data-cell"><div class="cell-label">Medium</div><div class="cell-value">${esc(a.medium)||"—"}</div></div>
       <div class="data-cell"><div class="cell-label">Dimensions</div><div class="cell-value">${dims}</div></div>
-    </div>
-    <div class="model-meta">
-      model band <span>${mi.score_band}</span> &nbsp;·&nbsp;
-      trained on <span>${(mi.n_training_samples||0).toLocaleString()}</span> works &nbsp;·&nbsp;
-      R² <span>${(mi.model_r2||0).toFixed(3)}</span> &nbsp;·&nbsp;
-      MAE <span>${fmt(mi.model_mae_usd)}</span>
     </div>`;
 
   document.getElementById("divider").classList.add("visible");
@@ -867,6 +886,18 @@ function fmtDate(s) {
   try { return new Date(s).toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"}); }
   catch(e) { return s; }
 }
+
+// Fade gradient on data grid scroll
+function updateGridFade() {
+    const wrap = document.getElementById("data-grid-wrap");
+    if (!wrap) return;
+    const grid = wrap.querySelector(".data-grid");
+    if (!grid) return;
+    wrap.classList.toggle("fade-top", grid.scrollTop > 10);
+    wrap.classList.toggle("fade-bottom", grid.scrollTop + grid.clientHeight < grid.scrollHeight - 10);
+}
+document.addEventListener("scroll", updateGridFade);
+
 </script>
 </body>
 </html>
