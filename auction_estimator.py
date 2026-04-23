@@ -37,6 +37,7 @@ import io
 import json
 import math
 import pickle
+import os
 import re
 import sqlite3
 import time
@@ -825,6 +826,81 @@ def find_nearest_model_band(target: int) -> Optional[int]:
     return min(trained, key=lambda b: abs(b - target)) if trained else None
 
 
+def get_gemini_appraisal(title: str, artist: str) -> None:
+    """Ask Gemini for expert appraisal estimate of an artwork. Returns USD float or None."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        log.warning("GEMINI_API_KEY not set — skipping Gemini appraisal")
+        return None
+    try:
+        prompt = (
+            f"What is the current expert appraisal or estimated auction value of the artwork "
+            f"\"{title}\" by {artist}? "
+            f"Reply with ONLY a single number in USD with no symbols, commas, or text. "
+            f"Example: 45000000 "
+            f"If unknown, reply with: unknown"
+        )
+        r = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+            headers={"Content-Type": "application/json"},
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+            timeout=15,
+        )
+        r.raise_for_status()
+        text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        log.info(f"  Gemini appraisal response: '{text}'")
+        if text.lower() == "unknown" or not text:
+            return None
+        # Extract first number from response
+        nums = re.findall(r"[\d]+", text.replace(",", ""))
+        if nums:
+            val = float("".join(nums[:2]))  # handle cases like "45 000000"
+            if 1_000 <= val <= 10_000_000_000:
+                return val
+    except Exception as e:
+        if "429" in str(e):
+            log.warning("Gemini rate limited — please wait a minute and try again")
+        else:
+            log.warning(f"Gemini appraisal failed: {e}")
+    return None
+
+
+def get_artwork_wikipedia_score(title: str) -> float:
+    """
+    Score an artwork based on its own Wikipedia page popularity.
+    Returns a multiplier between 0.5 and 5.0.
+    High traffic = famous painting = higher value.
+    """
+    if not title:
+        return 1.0
+    try:
+        # Get pageviews
+        wiki_title = title.replace(" ", "_")
+        pageviews = get_monthly_pageviews(wiki_title)
+        wiki_len = get_wiki_length(wiki_title)
+
+        # Log-normalize against reference values
+        # A very famous painting like Mona Lisa gets ~500k views/month
+        REF_PAGEVIEWS = 500_000
+        REF_WIKILEN = 150_000
+
+        def lnorm(v, ref):
+            return math.log1p(v) / math.log1p(ref) if ref > 0 else 0
+
+        # Combine signals (pageviews weighted more heavily)
+        score = 0.7 * lnorm(pageviews, REF_PAGEVIEWS) + 0.3 * lnorm(wiki_len, REF_WIKILEN)
+
+        # Convert to multiplier: unknown painting=0.5, average=1.0, famous=3.0, iconic=5.0
+        multiplier = 0.7 + (score * 2.3)
+        multiplier = max(0.7, min(2.5, multiplier))
+
+        log.info(f"  Artwork Wikipedia score: pageviews={pageviews:,} len={wiki_len:,} multiplier={multiplier:.2f}x")
+        return multiplier
+    except Exception as e:
+        log.warning(f"Could not score artwork Wikipedia page: {e}")
+        return 1.0
+
+
 def get_artist_median_price(artist_id: int) -> Optional[float]:
     """Get median sale price for a specific artist from DB."""
     if not artist_id:
@@ -846,13 +922,10 @@ def get_artist_median_price(artist_id: int) -> Optional[float]:
 
 def apply_artwork_adjustments(base_price: float, decade, medium: str,
                                width_cm, height_cm, depth_cm) -> float:
-    """Adjust a base price for medium, size, and age."""
-    price = base_price
-
-    # Medium multiplier
+    """Adjust base price for medium only. No size or age adjustments."""
     medium_multipliers = {
-        "oil on canvas": 1.2,
-        "oil on panel": 1.15,
+        "oil on canvas": 1.0,
+        "oil on panel": 1.0,
         "watercolor": 0.6,
         "pencil": 0.4,
         "charcoal": 0.4,
@@ -861,31 +934,10 @@ def apply_artwork_adjustments(base_price: float, decade, medium: str,
         "screenprint": 0.3,
         "photograph": 0.35,
         "bronze": 0.9,
-        "marble": 1.1,
+        "marble": 1.0,
     }
     m = medium.lower().strip() if medium else "unknown"
-    price *= medium_multipliers.get(m, 1.0)
-
-    # Size multiplier (only for 2D works) — very conservative
-    if width_cm and height_cm and not is_3d_medium(m):
-        area = width_cm * height_cm
-        # Reference area: 73x92cm = 6716 sq cm (typical medium canvas)
-        size_factor = math.sqrt(area / 6716)
-        size_factor = max(0.5, min(1.5, size_factor))  # tight cap: never more than 1.5x
-        price *= size_factor
-
-    # Decade adjustment — older works slight premium
-    if decade:
-        age = 2024 - decade
-        if age > 200:
-            price *= 1.3
-        elif age > 100:
-            price *= 1.15
-        elif age < 30:
-            price *= 0.9
-
-    return price
-
+    return base_price * medium_multipliers.get(m, 1.0)
 
 def predict_price(
     artist_score: float,
@@ -895,13 +947,31 @@ def predict_price(
     height_cm: Optional[float],
     depth_cm: Optional[float],
     artist_id: Optional[int] = None,
+    artwork_title: Optional[str] = None,
 ) -> dict:
     # Try artist-level median prediction first
+    # Score the painting itself on Wikipedia
+    artwork_wiki_multiplier = get_artwork_wikipedia_score(artwork_title) if artwork_title else 1.0
+    gemini_price = get_gemini_appraisal(artwork_title or "", "") if artwork_title else None
     median_price = get_artist_median_price(artist_id)
+    median_count = len(get_conn().execute("SELECT id FROM artworks WHERE artist_id=? AND sale_price_usd > 0", (artist_id,)).fetchall()) if artist_id else 0
     if median_price is not None:
         adjusted = apply_artwork_adjustments(median_price, decade, medium or "unknown", width_cm, height_cm, depth_cm)
-        score_multiplier = math.exp(min((artist_score - 5.0) * 0.18, 2.0)) 
-        adjusted = min(adjusted * score_multiplier, 5_000_000_000)  # hard cap at $5B
+        score_multiplier = math.exp(min((artist_score - 5.0) * 0.10, 0.5))
+        # Blend artist score multiplier with artwork wikipedia popularity
+        # Artwork signal weighted 30%, artist signal 70%
+        combined_multiplier = (artwork_wiki_multiplier * 0.3) + (score_multiplier * 0.7)
+        # Only apply multiplier if we have multiple data points
+        # Single data point = return median directly (avoid compounding)
+        # Blend Gemini appraisal if available
+        if gemini_price:
+            log.info(f"  Blending Gemini appraisal: ${gemini_price:,.0f}")
+            # 50% median, 50% Gemini when we have both
+            adjusted = (adjusted * 0.5) + (gemini_price * 0.5)
+        if median_count >= 3:
+            adjusted = min(adjusted * combined_multiplier, 5_000_000_000)
+        else:
+            adjusted = min(adjusted, 5_000_000_000)
         mae = adjusted * 0.4  # 40% confidence interval for median-based prediction
         band = max(1, min(9, int(artist_score)))
         conn = get_conn()
@@ -1046,6 +1116,7 @@ def estimate_from_url(url: str) -> dict:
         height_cm    = artwork["height_cm"],
         depth_cm     = artwork["depth_cm"],
         artist_id    = artist.get("id"),
+        artwork_title = artwork["title"],
     )
 
     # 5. Assemble full output
