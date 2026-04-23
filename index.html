@@ -982,7 +982,7 @@ function runMonteCarlo(estimate, mae) {
     const wrap = document.getElementById("monte-canvas-wrap");
     wrap.innerHTML = "";
     const canvas = document.createElement("canvas");
-    const W = wrap.clientWidth || 680;
+    const W = wrap.getBoundingClientRect().width || wrap.offsetWidth || 680;
     const H = 140;
     canvas.width = W;
     canvas.height = H;
