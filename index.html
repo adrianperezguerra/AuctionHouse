@@ -603,12 +603,10 @@ let currentMode = "wiki";
 
 function setMode(mode) {
   currentMode = mode;
-  document.getElementById("mode-wiki").style.display   = mode === "wiki"   ? "block" : "none";
+  document.getElementById("mode-wiki").style.display = mode === "wiki" ? "block" : "none";
   document.getElementById("mode-manual").style.display = mode === "manual" ? "block" : "none";
-  const activeStyle   = "background:var(--ink);color:var(--parchment)";
-  const inactiveStyle = "background:var(--parchment);color:#9a8e80";
-  document.getElementById("tab-wiki").style.cssText   = (mode === "wiki"   ? activeStyle : inactiveStyle);
-  document.getElementById("tab-manual").style.cssText = (mode === "manual" ? activeStyle : inactiveStyle);
+  document.getElementById("tab-wiki").className = "tab-btn " + (mode === "wiki" ? "tab-active" : "tab-inactive");
+  document.getElementById("tab-manual").className = "tab-btn " + (mode === "manual" ? "tab-active" : "tab-inactive");
 }
 
 async function runEstimate() {
