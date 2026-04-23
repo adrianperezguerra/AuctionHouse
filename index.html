@@ -952,17 +952,93 @@ document.addEventListener("scroll", updateGridFade);
 
 function runMonteCarlo(estimate, mae) {
     const N = 10000;
-    const sigma = Math.log(1 + mae / estimate);
+    const sigma = Math.log(1 + (mae || estimate * 0.4) / estimate);
     const mu = Math.log(estimate) - 0.5 * sigma * sigma;
 
-    // Generate samples
+    // Generate samples using Box-Muller
     const samples = [];
     for (let i = 0; i < N; i++) {
-        // Box-Muller transform
-        const u1 = Math.random(), u2 = Math.random();
+        const u1 = Math.random() || 1e-10;
+        const u2 = Math.random();
         const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
         samples.push(Math.exp(mu + sigma * z));
     }
+    samples.sort((a, b) => a - b);
+
+    const minVal = samples[Math.floor(N * 0.02)];
+    const maxVal = samples[Math.floor(N * 0.98)];
+    const BINS = 50;
+    const binSize = (maxVal - minVal) / BINS;
+    const bins = new Array(BINS).fill(0);
+    for (const s of samples) {
+        if (s < minVal || s > maxVal) continue;
+        const idx = Math.min(Math.floor((s - minVal) / binSize), BINS - 1);
+        bins[idx]++;
+    }
+    const maxBin = Math.max(...bins);
+
+    // Build SVG
+    const W = 600, H = 120, PAD = 8;
+    const barW = W / BINS;
+    let bars = "";
+    for (let i = 0; i < BINS; i++) {
+        const h = Math.max(2, (bins[i] / maxBin) * (H - PAD));
+        const x = i * barW;
+        const y = H - h;
+        const t = bins[i] / maxBin;
+        let r, g, b;
+        if (t < 0.4) {
+            const s = t / 0.4;
+            r = Math.round(220 + (180 - 220) * s);
+            g = Math.round(100 + (40 - 100) * s);
+            b = Math.round(30 + (40 - 30) * s);
+        } else {
+            const s = (t - 0.4) / 0.6;
+            r = Math.round(180 + (100 - 180) * s);
+            g = Math.round(40 + (30 - 40) * s);
+            b = Math.round(40 + (160 - 40) * s);
+        }
+        bars += `<rect x="${x+0.5}" y="${y}" width="${barW-1}" height="${h}" fill="rgb(${r},${g},${b})" rx="1"/>`;
+    }
+
+    // Estimate line
+    const estPct = (estimate - minVal) / (maxVal - minVal);
+    const estX = Math.max(0, Math.min(W, estPct * W));
+    const estLine = `<line x1="${estX}" y1="0" x2="${estX}" y2="${H}" stroke="rgba(184,146,42,0.9)" stroke-width="1.5" stroke-dasharray="4,3"/>`;
+
+    const p10 = fmt(samples[Math.floor(N * 0.10)]);
+    const p50 = fmt(samples[Math.floor(N * 0.50)]);
+    const p90 = fmt(samples[Math.floor(N * 0.90)]);
+
+    const wrap = document.getElementById("monte-canvas-wrap");
+    wrap.innerHTML = `
+        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
+             style="width:100%;height:${H}px;display:block;overflow:visible">
+            ${bars}${estLine}
+        </svg>
+        <div id="monte-tooltip" class="monte-tooltip"></div>
+    `;
+
+    // Axis
+    document.getElementById("monte-axis").innerHTML =
+        `<span>${fmt(minVal)}</span><span>p10 ${p10}</span><span>p50 ${p50}</span><span>p90 ${p90}</span><span>${fmt(maxVal)}</span>`;
+
+    // Hover tooltip
+    const svg = wrap.querySelector("svg");
+    const tooltip = document.getElementById("monte-tooltip");
+    svg.addEventListener("mousemove", (e) => {
+        const rect = svg.getBoundingClientRect();
+        const xPct = (e.clientX - rect.left) / rect.width;
+        const price = minVal + xPct * (maxVal - minVal);
+        const binIdx = Math.min(Math.floor(xPct * BINS), BINS - 1);
+        const pct = ((bins[binIdx] / N) * 100).toFixed(2);
+        tooltip.style.opacity = "1";
+        tooltip.style.left = (e.clientX - rect.left) + "px";
+        tooltip.style.top = "-28px";
+        tooltip.textContent = `${fmt(price)}  —  ${pct}%`;
+    });
+    svg.addEventListener("mouseleave", () => { tooltip.style.opacity = "0"; });
+}
     samples.sort((a, b) => a - b);
 
     // Build histogram
