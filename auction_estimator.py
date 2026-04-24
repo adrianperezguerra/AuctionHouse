@@ -865,40 +865,34 @@ def get_gemini_appraisal(title: str, artist: str) -> None:
     return None
 
 
-def get_artwork_wikipedia_score(title: str) -> float:
+def get_artwork_wikipedia_score(title: str) -> tuple:
     """
     Score an artwork based on its own Wikipedia page popularity.
-    Returns a multiplier between 0.5 and 5.0.
-    High traffic = famous painting = higher value.
+    Returns (multiplier, pageviews) tuple.
     """
     if not title:
-        return 1.0
+        return 1.0, 0
     try:
-        # Get pageviews
         wiki_title = title.replace(" ", "_")
         pageviews = get_monthly_pageviews(wiki_title)
         wiki_len = get_wiki_length(wiki_title)
 
-        # Log-normalize against reference values
-        # A very famous painting like Mona Lisa gets ~500k views/month
-        REF_PAGEVIEWS = 500_000
-        REF_WIKILEN = 150_000
+        REF_PAGEVIEWS = 200_000
+        REF_WIKILEN = 100_000
 
         def lnorm(v, ref):
             return math.log1p(v) / math.log1p(ref) if ref > 0 else 0
 
-        # Combine signals (pageviews weighted more heavily)
-        score = 0.7 * lnorm(pageviews, REF_PAGEVIEWS) + 0.3 * lnorm(wiki_len, REF_WIKILEN)
-
-        # Convert to multiplier: unknown painting=0.5, average=1.0, famous=3.0, iconic=5.0
-        multiplier = 0.7 + (score * 2.3)
-        multiplier = max(0.7, min(2.5, multiplier))
+        score = 0.75 * lnorm(pageviews, REF_PAGEVIEWS) + 0.25 * lnorm(wiki_len, REF_WIKILEN)
+        multiplier = 0.7 + (score * 7.3)
+        multiplier = max(0.7, min(8.0, multiplier))
 
         log.info(f"  Artwork Wikipedia score: pageviews={pageviews:,} len={wiki_len:,} multiplier={multiplier:.2f}x")
-        return multiplier
+        return multiplier, pageviews
     except Exception as e:
         log.warning(f"Could not score artwork Wikipedia page: {e}")
-        return 1.0
+        return 1.0, 0
+
 
 
 def get_artist_median_price(artist_id: int) -> Optional[float]:
@@ -951,7 +945,10 @@ def predict_price(
 ) -> dict:
     # Try artist-level median prediction first
     # Score the painting itself on Wikipedia
-    artwork_wiki_multiplier = get_artwork_wikipedia_score(artwork_title) if artwork_title else 1.0
+    artwork_wiki_result = get_artwork_wikipedia_score(artwork_title) if artwork_title else (1.0, 0)
+    artwork_wiki_result = artwork_wiki_result if isinstance(artwork_wiki_result, tuple) else (artwork_wiki_result, 0)
+    artwork_wiki_multiplier = artwork_wiki_result[0]
+    artwork_pageviews = artwork_wiki_result[1]
     gemini_price = get_gemini_appraisal(artwork_title or "", "") if artwork_title else None
     median_price = get_artist_median_price(artist_id)
     median_count = len(get_conn().execute("SELECT id FROM artworks WHERE artist_id=? AND sale_price_usd > 0", (artist_id,)).fetchall()) if artist_id else 0
@@ -959,9 +956,12 @@ def predict_price(
         adjusted = apply_artwork_adjustments(median_price, decade, medium or "unknown", width_cm, height_cm, depth_cm)
         score_multiplier = math.exp(min((artist_score - 5.0) * 0.10, 0.5))
         # Blend artist score multiplier with artwork wikipedia popularity
-        # Artwork signal weighted 30%, artist signal 70%
-        combined_multiplier = (artwork_wiki_multiplier * 0.3) + (score_multiplier * 0.7)
-        # Only apply multiplier if we have multiple data points
+        # Weight painting popularity heavily for famous paintings (high pageviews)
+        # For iconic paintings (>50k views), painting score dominates
+        paint_weight = min(0.90, 0.3 + (artwork_pageviews / 20000) * 0.60)
+        artist_weight = 1.0 - paint_weight
+        combined_multiplier = (artwork_wiki_multiplier * paint_weight) + (score_multiplier * artist_weight)
+        log.info(f"  Blend: paint_weight={paint_weight:.2f} artwork_mult={artwork_wiki_multiplier:.2f}x score_mult={score_multiplier:.2f}x combined={combined_multiplier:.2f}x")
         # Single data point = return median directly (avoid compounding)
         # Blend Gemini appraisal if available
         if gemini_price:
