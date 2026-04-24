@@ -750,7 +750,9 @@ function renderResult(d) {
     document.getElementById("result").innerHTML += monteHtml;
   requestAnimationFrame(() => {
     document.getElementById("result").classList.add("visible");
-    
+    setTimeout(() => {
+        runMonteCarlo(d.estimated_price_usd, d.model_info.model_mae_usd || d.estimated_price_usd * 0.4);
+    }, 200);
   });
 }
 
