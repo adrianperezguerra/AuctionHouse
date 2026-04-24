@@ -293,9 +293,71 @@ def estimate_manual():
         return jsonify({"error": str(e)}), 500
 
 
+
+@app.route("/api/comparables", methods=["POST"])
+@require_auth
+def get_comparables():
+    try:
+        data = request.get_json()
+        score_band = data.get("score_band", 5)
+        medium = data.get("medium", "")
+        decade = data.get("decade")
+        title = data.get("title", "")
+
+        conn = get_auction_conn()
+        # Find similar artworks by band, prefer same medium and nearby decade
+        rows = conn.execute("""
+            SELECT aw.title, ar.name as artist, aw.sale_price_usd,
+                   aw.sale_year, aw.medium_raw, aw.decade, aw.score_band
+            FROM artworks aw
+            JOIN artists ar ON ar.id = aw.artist_id
+            WHERE aw.score_band BETWEEN ? AND ?
+              AND aw.sale_price_usd > 0
+              AND aw.sale_price_usd < 5000000000
+              AND lower(aw.title) != lower(?)
+              AND aw.title NOT LIKE '%%27%'
+              AND aw.title NOT LIKE '%%25%'
+              AND aw.title NOT LIKE '%NBA%'
+              AND aw.title NOT LIKE '%Facebook%'
+              AND aw.title NOT LIKE '%Google%'
+              AND length(aw.title) > 3
+            ORDER BY
+                CASE WHEN lower(aw.medium_raw) LIKE ? THEN 0 ELSE 1 END,
+                CASE WHEN aw.decade BETWEEN ? AND ? THEN 0 ELSE 1 END,
+                ABS(aw.sale_price_usd - (
+                    SELECT AVG(sale_price_usd) FROM artworks
+                    WHERE score_band = ? AND sale_price_usd > 0
+                ))
+            LIMIT 5
+        """, (
+            max(1, score_band - 1), min(9, score_band + 1),
+            title,
+            f"%{medium[:20]}%" if medium else "%",
+            (decade or 1900) - 20, (decade or 1900) + 20,
+            score_band
+        )).fetchall()
+        conn.close()
+
+        comparables = []
+        for r in rows:
+            comparables.append({
+                "title": r["title"],
+                "artist": r["artist"],
+                "sale_price_usd": r["sale_price_usd"],
+                "sale_year": r["sale_year"],
+                "medium": r["medium_raw"],
+                "decade": r["decade"],
+            })
+        return jsonify({"comparables": comparables})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
+
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────

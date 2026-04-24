@@ -273,6 +273,55 @@ min-width:0;box-sizing:border-box;
     font-size: 0.55rem;
     color: #9a8e80;
 }
+
+.comp-wrap {
+    margin-top: 32px;
+    padding-top: 28px;
+    border-top: 1px solid var(--dust);
+}
+.comp-title {
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 16px;
+}
+.comp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+.comp-table th {
+    font-family: var(--mono);
+    font-size: 0.52rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: #9a8e80;
+    text-align: left;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--dust);
+}
+.comp-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--dust);
+    font-family: var(--serif);
+    color: var(--ink);
+}
+.comp-table tr:last-child td { border-bottom: none; }
+.comp-table tr:hover td { background: var(--cream); }
+.comp-price {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--ink);
+    font-weight: 600;
+}
+.comp-loading {
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    color: #9a8e80;
+    padding: 12px 0;
+}
 </style>
 </head>
 <body>
@@ -738,6 +787,13 @@ function renderResult(d) {
 
   document.getElementById("divider").classList.add("visible");
     // Append Monte Carlo chart
+    const compHtml = `
+        <div class="comp-wrap" style="margin-top:32px;padding-top:28px;border-top:1px solid var(--dust)">
+            <div class="comp-title">Comparable Sales</div>
+            <div id="comp-wrap"></div>
+        </div>
+    `;
+    document.getElementById("result").innerHTML += compHtml;
     const monteHtml = `
         <div class="monte-wrap">
             <div class="monte-title">Monte Carlo Price Distribution — 10,000 Simulations</div>
@@ -752,6 +808,7 @@ function renderResult(d) {
     document.getElementById("result").classList.add("visible");
     setTimeout(() => {
         runMonteCarlo(d.estimated_price_usd, d.model_info.model_mae_usd || d.estimated_price_usd * 0.4);
+        loadComparables(d.model_info.score_band, d.artwork.medium, d.artwork.decade, d.artwork.title);
     }, 200);
   });
 }
@@ -1140,6 +1197,50 @@ function runMonteCarlo(estimate, mae) {
     canvas.addEventListener("mouseleave", () => {
         tooltip.style.opacity = "0";
     });
+
+
+async function loadComparables(score_band, medium, decade, title) {
+    const wrap = document.getElementById("comp-wrap");
+    if (!wrap) return;
+    wrap.innerHTML = '<div class="comp-loading">Loading comparable sales...</div>';
+    try {
+        const r = await apiFetch("/api/comparables", "POST", {
+            score_band, medium, decade, title
+        });
+        const data = await r.json();
+        if (!data.comparables || data.comparables.length === 0) {
+            wrap.innerHTML = '<div class="comp-loading">No comparable sales found.</div>';
+            return;
+        }
+        let rows = data.comparables.map(c => `
+            <tr>
+                <td><em>${c.title}</em></td>
+                <td>${c.artist}</td>
+                <td>${c.decade ? c.decade + "s" : "—"}</td>
+                <td>${c.medium || "—"}</td>
+                <td class="comp-price">${fmt(c.sale_price_usd)}</td>
+                <td>${c.sale_year || "—"}</td>
+            </tr>
+        `).join("");
+        wrap.innerHTML = `
+            <table class="comp-table">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Artist</th>
+                        <th>Decade</th>
+                        <th>Medium</th>
+                        <th>Sale Price</th>
+                        <th>Year</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    } catch(e) {
+        wrap.innerHTML = '<div class="comp-loading">Could not load comparables.</div>';
+    }
+}
 
 </script>
 </body>
