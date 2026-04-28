@@ -429,6 +429,66 @@ def delete_portfolio_item(item_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route("/api/identify-image", methods=["POST"])
+@require_auth
+def identify_image():
+    try:
+        import base64, json as json_mod
+        api_key = os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            return jsonify({"error": "Gemini API key not configured"}), 500
+
+        data = request.get_json()
+        image_b64 = data.get("image_b64")
+        if not image_b64:
+            return jsonify({"error": "No image provided"}), 400
+
+        # Strip data URL prefix if present
+        if "," in image_b64:
+            image_b64 = image_b64.split(",")[1]
+
+        prompt = (
+            "You are an expert art historian. Look at this artwork and identify it. "
+            "Search your knowledge to determine: the exact title, the artist full name, "
+            "and the Wikipedia URL for this specific artwork. "
+            "Reply ONLY as JSON like: "
+            '{"title": "The Starry Night", "artist": "Vincent van Gogh", ' 
+            '"wiki_url": "https://en.wikipedia.org/wiki/The_Starry_Night", ' 
+            '"confidence": "high"} '
+            "If you cannot identify it, reply: "
+            '{"title": null, "artist": null, "wiki_url": null, "confidence": "low"}' 
+        )
+
+        r = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+            headers={"Content-Type": "application/json"},
+            json={
+                "contents": [{
+                    "parts": [
+                        {"inline_data": {"mime_type": "image/jpeg", "data": image_b64}},
+                        {"text": prompt}
+                    ]
+                }]
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+        # Extract JSON from response
+        import re as re_mod
+        match = re_mod.search(r'\{.*\}', text, re_mod.DOTALL)
+        if match:
+            result = json_mod.loads(match.group())
+            return jsonify(result)
+        return jsonify({"error": "Could not parse Gemini response", "raw": text}), 500
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})

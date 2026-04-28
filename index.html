@@ -360,6 +360,64 @@ min-width:0;box-sizing:border-box;
     margin-top: 8px;
 }
 .portfolio-add-btn:hover { background: #2a2a2a; }
+
+.img-upload-wrap {
+    border: 1.5px dashed var(--dust);
+    border-radius: 2px;
+    padding: 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    margin-bottom: 20px;
+    position: relative;
+}
+.img-upload-wrap:hover, .img-upload-wrap.dragover {
+    border-color: var(--gold);
+    background: rgba(184,146,42,0.04);
+}
+.img-upload-label {
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #9a8e80;
+}
+.img-upload-sub {
+    font-family: var(--mono);
+    font-size: 0.55rem;
+    color: #b8a898;
+    margin-top: 6px;
+}
+.img-preview {
+    max-width: 100%;
+    max-height: 240px;
+    margin: 0 auto 16px;
+    display: block;
+    border: 1px solid var(--dust);
+}
+.img-identified {
+    background: var(--cream);
+    border: 1px solid var(--dust);
+    padding: 14px 18px;
+    margin-bottom: 16px;
+    font-family: var(--mono);
+    font-size: 0.62rem;
+}
+.img-identified-title {
+    font-family: var(--serif);
+    font-size: 1rem;
+    font-style: italic;
+    color: var(--ink);
+    margin-bottom: 4px;
+}
+.img-identified-artist {
+    color: #9a8e80;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-size: 0.55rem;
+}
+.img-confidence-high { color: #4a7c4a; }
+.img-confidence-low { color: #8b4a2a; }
 </style>
 </head>
 <body>
@@ -411,6 +469,9 @@ min-width:0;box-sizing:border-box;
           Wikipedia URL
         </button>
         <button id="tab-manual" onclick="setMode('manual')" class="tab-btn tab-inactive">
+                Manual Entry
+                </button>
+                <button id="tab-image" onclick="setMode('image')" class="tab-btn tab-inactive">
           Manual Entry
         </button>
       </div>
@@ -734,11 +795,16 @@ function setMode(mode) {
   currentMode = mode;
   document.getElementById("mode-wiki").style.display = mode === "wiki" ? "block" : "none";
   document.getElementById("mode-manual").style.display = mode === "manual" ? "block" : "none";
+  const imgDiv = document.getElementById("mode-image");
+  if (imgDiv) imgDiv.style.display = mode === "image" ? "block" : "none";
   document.getElementById("tab-wiki").className = "tab-btn " + (mode === "wiki" ? "tab-active" : "tab-inactive");
   document.getElementById("tab-manual").className = "tab-btn " + (mode === "manual" ? "tab-active" : "tab-inactive");
+  const imgTab = document.getElementById("tab-image");
+  if (imgTab) imgTab.className = "tab-btn " + (mode === "image" ? "tab-active" : "tab-inactive");
 }
 
 async function runEstimate() {
+  if (currentMode === "image") { runImageEstimate(); return; }
   const btn = document.getElementById("estimate-btn");
   const err = document.getElementById("estimate-err");
   err.className = "msg msg-error";
@@ -1355,6 +1421,96 @@ function showToast(msg) {
     t.textContent = msg;
     t.style.opacity = "1";
     setTimeout(() => { t.style.opacity = "0"; }, 2500);
+}
+
+
+let imageB64 = null;
+let identifiedWikiUrl = null;
+
+function handleImageFile(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        imageB64 = e.target.result;
+        document.getElementById("img-preview").src = imageB64;
+        document.getElementById("img-preview-wrap").style.display = "block";
+        document.getElementById("img-upload-prompt").style.display = "none";
+        document.getElementById("img-identified-wrap").style.display = "none";
+        document.getElementById("img-error").style.display = "none";
+    };
+    reader.readAsDataURL(file);
+}
+
+// Drag and drop
+document.addEventListener("DOMContentLoaded", () => {
+    const zone = document.getElementById("img-drop-zone");
+    if (!zone) return;
+    zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("dragover"); });
+    zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
+    zone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        zone.classList.remove("dragover");
+        const file = e.dataTransfer.files[0];
+        if (file) {
+            const input = document.getElementById("img-file-input");
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            input.files = dt.files;
+            handleImageFile(input);
+        }
+    });
+});
+
+async function runImageEstimate() {
+    if (!imageB64) {
+        showError("Please upload an image first.");
+        return;
+    }
+    const btn = document.getElementById("estimate-btn");
+    btn.disabled = true;
+    btn.textContent = "IDENTIFYING...";
+    document.getElementById("img-error").style.display = "none";
+
+    try {
+        const r = await apiFetch("/api/identify-image", "POST", { image_b64: imageB64 });
+        const data = await r.json();
+
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        if (!data.wiki_url || data.confidence === "low") {
+            document.getElementById("img-error").textContent = "Could not identify this artwork. Please try a clearer image or use the Wikipedia URL tab.";
+            document.getElementById("img-error").style.display = "block";
+            btn.disabled = false;
+            btn.textContent = "ESTIMATE";
+            return;
+        }
+
+        // Show identification result
+        document.getElementById("img-title").textContent = data.title || "Unknown";
+        document.getElementById("img-artist").textContent = data.artist || "Unknown artist";
+        const confEl = document.getElementById("img-confidence");
+        confEl.textContent = data.confidence;
+        confEl.className = "img-confidence-" + (data.confidence === "high" ? "high" : "low");
+        document.getElementById("img-identified-wrap").style.display = "block";
+        identifiedWikiUrl = data.wiki_url;
+
+        // Now run the estimate with the identified wiki URL
+        btn.textContent = "ESTIMATING...";
+        const estR = await apiFetch("/api/estimate", "POST", { url: data.wiki_url });
+        const estData = await estR.json();
+        if (estData.error) throw new Error(estData.error);
+        renderResult(estData);
+
+    } catch(e) {
+        document.getElementById("img-error").textContent = "Error: " + e.message;
+        document.getElementById("img-error").style.display = "block";
+    }
+
+    btn.disabled = false;
+    btn.textContent = "ESTIMATE";
 }
 
 </script>
