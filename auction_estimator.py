@@ -834,10 +834,11 @@ def get_gemini_appraisal(title: str, artist: str) -> None:
         return None
     try:
         prompt = (
-            f"What is the current expert appraisal or estimated auction value of the artwork "
+            f"What is the current expert appraisal range for the artwork "
             f"\"{title}\" by {artist}? "
-            f"Reply with ONLY a single number in USD with no symbols, commas, or text. "
-            f"Example: 45000000 "
+            f"Reply with ONLY two numbers separated by a hyphen, representing the low and high "
+            f"end of the expert appraisal range in USD with no symbols or commas. "
+            f"Example: 45000000-120000000 "
             f"If unknown, reply with: unknown"
         )
         r = requests.post(
@@ -851,18 +852,66 @@ def get_gemini_appraisal(title: str, artist: str) -> None:
         log.info(f"  Gemini appraisal response: '{text}'")
         if text.lower() == "unknown" or not text:
             return None
-        # Extract first number from response
-        nums = re.findall(r"[\d]+", text.replace(",", ""))
-        if nums:
-            val = float("".join(nums[:2]))  # handle cases like "45 000000"
+        # Parse range like "45000000-120000000" or single value
+        nums = re.findall(r"[\d]+", text.replace(",", "").replace(".", ""))
+        if len(nums) >= 2:
+            low, high = float(nums[0]), float(nums[1])
+            if 1_000 <= low <= 10_000_000_000 and 1_000 <= high <= 10_000_000_000:
+                mid = (low + high) / 2
+                log.info(f"  Gemini range: ${low:,.0f} — ${high:,.0f} (mid=${mid:,.0f})")
+                return (low, high, mid)
+        elif len(nums) == 1:
+            val = float(nums[0])
             if 1_000 <= val <= 10_000_000_000:
-                return val
+                return (val * 0.7, val * 1.3, val)
     except Exception as e:
         if "429" in str(e):
             log.warning("Gemini rate limited — please wait a minute and try again")
         else:
             log.warning(f"Gemini appraisal failed: {e}")
     return None
+
+
+def get_provenance_boost(title: str, artist: str) -> tuple:
+    """Ask Gemini about provenance signals. Returns (multiplier, reasons)"""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return 1.0, []
+    try:
+        prompt = (
+            f'For the artwork "{title}" by {artist}, list any notable provenance signals '
+            f'that would increase its auction value. Consider: famous previous owners '
+            f'(Rockefeller, Rothschild, Royal collections etc), major museum history, '
+            f'prestigious auction house sales, notable exhibitions. '
+            f'Reply ONLY as a JSON object like: '
+            f'{{"multiplier": 1.2, "reasons": ["Rockefeller collection", "MoMA exhibition"]}} '
+            f'Use multiplier 1.0 if no notable provenance, max 2.5 for exceptional provenance. '
+            f'If unknown reply: {{"multiplier": 1.0, "reasons": []}}'
+        )
+        r = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+            headers={"Content-Type": "application/json"},
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+            timeout=15,
+        )
+        r.raise_for_status()
+        text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        import json as json_mod
+        match = re.search(r"{.*}", text, re.DOTALL)
+        if match:
+            data = json_mod.loads(match.group())
+            multiplier = float(data.get("multiplier", 1.0))
+            reasons = data.get("reasons", [])
+            multiplier = max(1.0, min(2.5, multiplier))
+            if multiplier > 1.0:
+                log.info(f"  Gemini provenance: {multiplier:.2f}x — {reasons}")
+            return multiplier, reasons
+    except Exception as e:
+        if "429" in str(e):
+            log.warning("Gemini provenance rate limited — skipping")
+        else:
+            log.warning(f"Gemini provenance failed: {e}")
+    return 1.0, []
 
 
 def get_artwork_wikipedia_score(title: str) -> tuple:
@@ -962,13 +1011,26 @@ def predict_price(
         artist_weight = 1.0 - paint_weight
         combined_multiplier = (artwork_wiki_multiplier * paint_weight) + (score_multiplier * artist_weight)
         log.info(f"  Blend: paint_weight={paint_weight:.2f} artwork_mult={artwork_wiki_multiplier:.2f}x score_mult={score_multiplier:.2f}x combined={combined_multiplier:.2f}x")
-        # Single data point = return median directly (avoid compounding)
-        # Blend Gemini appraisal if available
-        if gemini_price:
-            log.info(f"  Blending Gemini appraisal: ${gemini_price:,.0f}")
-            # 50% median, 50% Gemini when we have both
-            adjusted = (adjusted * 0.5) + (gemini_price * 0.5)
+        # Apply combined multiplier if we have enough data points
         if median_count >= 3:
+            adjusted = min(adjusted * combined_multiplier, 5_000_000_000)
+        else:
+            adjusted = min(adjusted, 5_000_000_000)
+        # Gemini override logic
+        if gemini_price and isinstance(gemini_price, tuple):
+            g_low, g_high, g_mid = gemini_price
+            log.info(f"  Gemini appraisal: ${g_low:,.0f} — ${g_high:,.0f}")
+            # Check if our estimate is outside Gemini range by >15%
+            tolerance = 0.15
+            below = adjusted < g_low * (1 - tolerance)
+            above = adjusted > g_high * (1 + tolerance)
+            if below or above:
+                log.info(f"  Estimate ${adjusted:,.0f} outside Gemini range — overriding with Gemini mid ${g_mid:,.0f}")
+                adjusted = g_mid
+            else:
+                # Blend 40% Gemini, 60% our estimate
+                adjusted = adjusted * 0.6 + g_mid * 0.4
+                log.info(f"  Blended with Gemini: ${adjusted:,.0f}")
             adjusted = min(adjusted * combined_multiplier, 5_000_000_000)
         else:
             adjusted = min(adjusted, 5_000_000_000)
