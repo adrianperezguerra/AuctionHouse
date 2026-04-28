@@ -75,6 +75,22 @@ def init_auth_db():
             updated_at  TEXT DEFAULT (datetime("now"))
         );
         CREATE INDEX IF NOT EXISTS idx_portfolio_user ON portfolio(user_id);
+        CREATE TABLE IF NOT EXISTS estimation_history (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL,
+            title       TEXT,
+            artist      TEXT,
+            medium      TEXT,
+            decade      INTEGER,
+            wiki_url    TEXT,
+            estimated_price_usd REAL,
+            confidence_low      REAL,
+            confidence_high     REAL,
+            artist_score        REAL,
+            museum_class        INTEGER DEFAULT 0,
+            ran_at      TEXT DEFAULT (datetime("now"))
+        );
+        CREATE INDEX IF NOT EXISTS idx_history_user ON estimation_history(user_id);
     """)
     conn.commit()
     # Ensure dev account always exists
@@ -487,6 +503,38 @@ def identify_image():
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/history", methods=["GET"])
+@require_auth
+def get_history():
+    try:
+        user_id = request.user["sub"]
+        limit = int(request.args.get("limit", 50))
+        conn = get_conn()
+        rows = conn.execute("""
+            SELECT * FROM estimation_history
+            WHERE user_id=?
+            ORDER BY ran_at DESC
+            LIMIT ?
+        """, (user_id, limit)).fetchall()
+        conn.close()
+        return jsonify({"history": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/history/<int:item_id>", methods=["DELETE"])
+@require_auth
+def delete_history_item(item_id):
+    try:
+        user_id = request.user["sub"]
+        conn = get_conn()
+        conn.execute("DELETE FROM estimation_history WHERE id=? AND user_id=?", (item_id, user_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/health", methods=["GET"])

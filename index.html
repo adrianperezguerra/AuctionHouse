@@ -418,6 +418,24 @@ min-width:0;box-sizing:border-box;
 }
 .img-confidence-high { color: #4a7c4a; }
 .img-confidence-low { color: #8b4a2a; }
+
+.history-wrap { max-width: 780px; margin: 0 auto; padding: 40px 24px; }
+.history-item {
+    border-bottom: 1px solid var(--dust);
+    padding: 16px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+}
+.history-item:last-child { border-bottom: none; }
+.history-item-title { font-family: var(--serif); font-style: italic; font-size: 1rem; }
+.history-item-meta { font-family: var(--mono); font-size: 0.55rem; color: #9a8e80; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 3px; }
+.history-item-price { font-family: var(--mono); font-size: 0.85rem; white-space: nowrap; }
+.history-item-date { font-family: var(--mono); font-size: 0.55rem; color: #9a8e80; text-align: right; margin-top: 3px; }
+.history-empty { font-family: var(--mono); font-size: 0.7rem; color: #9a8e80; text-align: center; padding: 60px 0; }
+.history-delete { background: none; border: none; cursor: pointer; color: #c8b89a; font-size: 1rem; padding: 4px 8px; }
+.history-delete:hover { color: #8b0000; }
 </style>
 </head>
 <body>
@@ -1511,6 +1529,38 @@ async function runImageEstimate() {
 
     btn.disabled = false;
     btn.textContent = "ESTIMATE";
+}
+
+
+async function loadHistory() {
+    const r = await apiFetch("/api/history");
+    const data = await r.json();
+    const list = document.getElementById("history-list");
+    const empty = document.getElementById("history-empty");
+    if (!data.history || data.history.length === 0) {
+        list.innerHTML = "";
+        empty.style.display = "block";
+        return;
+    }
+    empty.style.display = "none";
+    list.innerHTML = data.history.map(item => `
+        <div class="history-item" id="hitem-${item.id}">
+            <div style="flex:1">
+                <div class="history-item-title">${item.title || "Unknown"}</div>
+                <div class="history-item-meta">${item.artist || ""} ${item.decade ? "· " + item.decade + "s" : ""} ${item.medium ? "· " + item.medium : ""}</div>
+            </div>
+            <div style="text-align:right">
+                <div class="history-item-price">${fmt(item.estimated_price_usd)}</div>
+                <div class="history-item-date">${item.ran_at ? item.ran_at.slice(0,10) : ""}</div>
+            </div>
+            <button class="history-delete" onclick="deleteHistoryItem(${item.id})" title="Remove">✕</button>
+        </div>
+    `).join("");
+}
+
+async function deleteHistoryItem(id) {
+    await apiFetch("/api/history/" + id, "DELETE");
+    document.getElementById("hitem-" + id)?.remove();
 }
 
 </script>
