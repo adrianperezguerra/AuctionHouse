@@ -537,6 +537,32 @@ def delete_history_item(item_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route("/api/artist-timeline", methods=["POST"])
+@require_auth
+def artist_timeline():
+    try:
+        data = request.get_json()
+        artist_name = data.get("artist", "")
+        conn = get_auction_conn()
+        rows = conn.execute("""
+            SELECT aw.decade, AVG(aw.sale_price_usd) as avg_price,
+                   MAX(aw.sale_price_usd) as max_price,
+                   MIN(aw.sale_price_usd) as min_price,
+                   COUNT(*) as sales
+            FROM artworks aw
+            JOIN artists ar ON ar.id = aw.artist_id
+            WHERE ar.name LIKE ?
+              AND aw.sale_price_usd > 0
+              AND aw.decade IS NOT NULL
+            GROUP BY aw.decade
+            ORDER BY aw.decade ASC
+        """, (f"%{artist_name}%",)).fetchall()
+        conn.close()
+        return jsonify({"timeline": [dict(r) for r in rows], "artist": artist_name})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})

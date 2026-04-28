@@ -436,6 +436,46 @@ min-width:0;box-sizing:border-box;
 .history-empty { font-family: var(--mono); font-size: 0.7rem; color: #9a8e80; text-align: center; padding: 60px 0; }
 .history-delete { background: none; border: none; cursor: pointer; color: #c8b89a; font-size: 1rem; padding: 4px 8px; }
 .history-delete:hover { color: #8b0000; }
+
+.timeline-wrap {
+    margin-top: 32px;
+    padding-top: 28px;
+    border-top: 1px solid var(--dust);
+}
+.timeline-title {
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 16px;
+}
+.timeline-svg-wrap {
+    width: 100%;
+    position: relative;
+}
+.timeline-axis {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    font-family: var(--mono);
+    font-size: 0.52rem;
+    color: #9a8e80;
+}
+.timeline-tooltip {
+    position: absolute;
+    background: var(--ink);
+    color: var(--parchment);
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    padding: 6px 12px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+    transform: translateX(-50%);
+    z-index: 10;
+}
 </style>
 </head>
 <body>
@@ -909,6 +949,13 @@ function renderResult(d) {
 
   document.getElementById("divider").classList.add("visible");
     // Append Monte Carlo chart
+    const timelineHtml = `
+        <div class="timeline-wrap">
+            <div class="timeline-title">Artist Price Timeline</div>
+            <div id="timeline-wrap"></div>
+        </div>
+    `;
+    document.getElementById("result").innerHTML += timelineHtml;
     const compHtml = `
         <div class="comp-wrap" style="margin-top:32px;padding-top:28px;border-top:1px solid var(--dust)">
             <div class="comp-title">Comparable Sales</div>
@@ -941,6 +988,7 @@ function renderResult(d) {
     setTimeout(() => {
         runMonteCarlo(d.estimated_price_usd, d.model_info.model_mae_usd || d.estimated_price_usd * 0.4);
         loadComparables(d.model_info.score_band, d.artwork.medium, d.artwork.decade, d.artwork.title);
+        loadArtistTimeline(d.artwork.artist);
     }, 200);
   });
 }
@@ -1561,6 +1609,90 @@ async function loadHistory() {
 async function deleteHistoryItem(id) {
     await apiFetch("/api/history/" + id, "DELETE");
     document.getElementById("hitem-" + id)?.remove();
+}
+
+
+async function loadArtistTimeline(artistName) {
+    const wrap = document.getElementById("timeline-wrap");
+    if (!wrap) return;
+    wrap.innerHTML = '<div class="comp-loading">Loading price timeline...</div>';
+
+    try {
+        const r = await apiFetch("/api/artist-timeline", "POST", { artist: artistName });
+        const data = await r.json();
+
+        if (!data.timeline || data.timeline.length < 2) {
+            wrap.innerHTML = '<div class="comp-loading">Not enough historical data for timeline.</div>';
+            return;
+        }
+
+        const points = data.timeline;
+        const W = 600, H = 120, PAD = 10;
+        const minDecade = Math.min(...points.map(p => p.decade));
+        const maxDecade = Math.max(...points.map(p => p.decade));
+        const maxPrice = Math.max(...points.map(p => p.avg_price));
+        const decadeRange = maxDecade - minDecade || 1;
+
+        const toX = (d) => PAD + ((d - minDecade) / decadeRange) * (W - PAD * 2);
+        const toY = (p) => H - PAD - (p / maxPrice) * (H - PAD * 2);
+
+        // Build SVG path
+        const pathD = points.map((p, i) =>
+            `${i === 0 ? "M" : "L"} ${toX(p.decade)} ${toY(p.avg_price)}`
+        ).join(" ");
+
+        // Area fill path
+        const areaD = pathD +
+            ` L ${toX(maxDecade)} ${H - PAD} L ${toX(minDecade)} ${H - PAD} Z`;
+
+        // Dots
+        const dots = points.map(p =>
+            `<circle cx="${toX(p.decade)}" cy="${toY(p.avg_price)}" r="3.5"
+             fill="var(--ink)" stroke="#fff" stroke-width="1.5"
+             class="timeline-dot"
+             data-decade="${p.decade}" data-price="${p.avg_price}" data-sales="${p.sales}"/>`
+        ).join("");
+
+        // Axis labels
+        const axisLabels = points.map(p =>
+            `<span>${p.decade}s</span>`
+        ).join("");
+
+        wrap.innerHTML = `
+            <div class="timeline-svg-wrap">
+                <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;overflow:visible">
+                    <defs>
+                        <linearGradient id="tl-grad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stop-color="var(--gold)" stop-opacity="0.3"/>
+                            <stop offset="100%" stop-color="var(--gold)" stop-opacity="0.0"/>
+                        </linearGradient>
+                    </defs>
+                    <path d="${areaD}" fill="url(#tl-grad)"/>
+                    <path d="${pathD}" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linejoin="round"/>
+                    ${dots}
+                </svg>
+                <div class="timeline-tooltip" id="timeline-tooltip"></div>
+            </div>
+            <div class="timeline-axis">${axisLabels}</div>
+        `;
+
+        // Hover on dots
+        const tooltip = document.getElementById("timeline-tooltip");
+        wrap.querySelectorAll(".timeline-dot").forEach(dot => {
+            dot.addEventListener("mouseenter", (e) => {
+                const rect = wrap.getBoundingClientRect();
+                const svgRect = dot.closest("svg").getBoundingClientRect();
+                tooltip.style.opacity = "1";
+                tooltip.style.left = (e.clientX - rect.left) + "px";
+                tooltip.style.top = "0px";
+                tooltip.textContent = `${dot.dataset.decade}s — avg ${fmt(parseFloat(dot.dataset.price))} (${dot.dataset.sales} sales)`;
+            });
+            dot.addEventListener("mouseleave", () => { tooltip.style.opacity = "0"; });
+        });
+
+    } catch(e) {
+        wrap.innerHTML = '<div class="comp-loading">Could not load timeline.</div>';
+    }
 }
 
 </script>
