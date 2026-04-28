@@ -322,6 +322,44 @@ min-width:0;box-sizing:border-box;
     color: #9a8e80;
     padding: 12px 0;
 }
+
+.portfolio-wrap { max-width: 780px; margin: 0 auto; padding: 40px 24px; }
+.portfolio-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 32px; }
+.portfolio-total { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.15em; color: var(--gold); }
+.portfolio-total span { font-size: 1.1rem; color: var(--ink); }
+.portfolio-empty { font-family: var(--mono); font-size: 0.7rem; color: #9a8e80; text-align: center; padding: 60px 0; }
+.portfolio-item {
+    border: 1px solid var(--dust);
+    background: #fff;
+    padding: 20px 24px;
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+}
+.portfolio-item:hover { border-color: #c8b89a; }
+.portfolio-item-info { flex: 1; }
+.portfolio-item-title { font-family: var(--serif); font-size: 1.05rem; font-style: italic; margin-bottom: 4px; }
+.portfolio-item-artist { font-family: var(--mono); font-size: 0.58rem; letter-spacing: 0.12em; color: #9a8e80; text-transform: uppercase; }
+.portfolio-item-price { font-family: var(--mono); font-size: 0.9rem; color: var(--ink); text-align: right; white-space: nowrap; }
+.portfolio-item-range { font-family: var(--mono); font-size: 0.55rem; color: #9a8e80; text-align: right; margin-top: 3px; }
+.portfolio-delete { background: none; border: none; cursor: pointer; color: #c8b89a; font-size: 1rem; padding: 4px 8px; }
+.portfolio-delete:hover { color: #8b0000; }
+.portfolio-add-btn {
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding: 14px;
+    background: var(--ink);
+    color: var(--parchment);
+    border: none;
+    cursor: pointer;
+    margin-top: 8px;
+}
+.portfolio-add-btn:hover { background: #2a2a2a; }
 </style>
 </head>
 <body>
@@ -794,6 +832,16 @@ function renderResult(d) {
         </div>
     `;
     document.getElementById("result").innerHTML += compHtml;
+    // Store result globally for portfolio
+    window._lastEstimate = d;
+    const portfolioBtnHtml = `
+        <div style="margin-top:16px;text-align:center">
+            <button class="portfolio-add-btn" onclick="addToPortfolio(window._lastEstimate)">
+                + ADD TO PORTFOLIO
+            </button>
+        </div>
+    `;
+    document.getElementById("result").innerHTML += portfolioBtnHtml;
     const monteHtml = `
         <div class="monte-wrap">
             <div class="monte-title">Monte Carlo Price Distribution — 10,000 Simulations</div>
@@ -1240,6 +1288,73 @@ async function loadComparables(score_band, medium, decade, title) {
     } catch(e) {
         wrap.innerHTML = '<div class="comp-loading">Could not load comparables.</div>';
     }
+}
+
+
+async function loadPortfolio() {
+    const r = await apiFetch("/api/portfolio");
+    const data = await r.json();
+    const list = document.getElementById("portfolio-list");
+    const empty = document.getElementById("portfolio-empty");
+    const total = document.getElementById("portfolio-total");
+
+    if (!data.portfolio || data.portfolio.length === 0) {
+        list.innerHTML = "";
+        empty.style.display = "block";
+        total.textContent = "—";
+        return;
+    }
+    empty.style.display = "none";
+    total.textContent = fmt(data.total_value);
+    list.innerHTML = data.portfolio.map(item => `
+        <div class="portfolio-item" id="pitem-${item.id}">
+            <div class="portfolio-item-info">
+                <div class="portfolio-item-title">${item.title}</div>
+                <div class="portfolio-item-artist">${item.artist || "Unknown artist"} ${item.decade ? "· " + item.decade + "s" : ""} ${item.medium ? "· " + item.medium : ""}</div>
+            </div>
+            <div>
+                <div class="portfolio-item-price">${fmt(item.estimated_price_usd)}</div>
+                <div class="portfolio-item-range">${fmt(item.confidence_low)} — ${fmt(item.confidence_high)}</div>
+            </div>
+            <button class="portfolio-delete" onclick="deletePortfolioItem(${item.id})" title="Remove">✕</button>
+        </div>
+    `).join("");
+}
+
+async function deletePortfolioItem(id) {
+    await apiFetch("/api/portfolio/" + id, "DELETE");
+    document.getElementById("pitem-" + id)?.remove();
+    loadPortfolio();
+}
+
+async function addToPortfolio(d) {
+    await apiFetch("/api/portfolio", "POST", {
+        title: d.artwork.title,
+        artist: d.artwork.artist,
+        medium: d.artwork.medium,
+        decade: d.artwork.decade,
+        width_cm: d.artwork.width_cm,
+        height_cm: d.artwork.height_cm,
+        wiki_url: d.artwork.url,
+        estimated_price_usd: d.estimated_price_usd,
+        confidence_low: d.confidence_interval[0],
+        confidence_high: d.confidence_interval[1],
+        artist_score: d.artist_score,
+    });
+    showToast("Added to portfolio");
+}
+
+function showToast(msg) {
+    let t = document.getElementById("toast");
+    if (!t) {
+        t = document.createElement("div");
+        t.id = "toast";
+        t.style.cssText = "position:fixed;bottom:32px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--parchment);font-family:var(--mono);font-size:0.62rem;letter-spacing:0.12em;padding:10px 24px;z-index:999;opacity:0;transition:opacity 0.3s";
+        document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.style.opacity = "1";
+    setTimeout(() => { t.style.opacity = "0"; }, 2500);
 }
 
 </script>

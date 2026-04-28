@@ -56,6 +56,25 @@ def init_auth_db():
             created_at TEXT DEFAULT (datetime('now')),
             last_login TEXT
         );
+        CREATE TABLE IF NOT EXISTS portfolio (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL,
+            title       TEXT NOT NULL,
+            artist      TEXT,
+            medium      TEXT,
+            decade      INTEGER,
+            width_cm    REAL,
+            height_cm   REAL,
+            wiki_url    TEXT,
+            estimated_price_usd REAL,
+            confidence_low      REAL,
+            confidence_high     REAL,
+            artist_score        REAL,
+            notes       TEXT,
+            added_at    TEXT DEFAULT (datetime("now")),
+            updated_at  TEXT DEFAULT (datetime("now"))
+        );
+        CREATE INDEX IF NOT EXISTS idx_portfolio_user ON portfolio(user_id);
     """)
     conn.commit()
     # Ensure dev account always exists
@@ -352,6 +371,62 @@ def get_comparables():
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/portfolio", methods=["GET"])
+@require_auth
+def get_portfolio():
+    try:
+        user_id = request.user["sub"]
+        conn = get_conn()
+        rows = conn.execute("""
+            SELECT * FROM portfolio WHERE user_id=? ORDER BY added_at DESC
+        """, (user_id,)).fetchall()
+        conn.close()
+        items = [dict(r) for r in rows]
+        total = sum(r["estimated_price_usd"] or 0 for r in items)
+        return jsonify({"portfolio": items, "total_value": total})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/portfolio", methods=["POST"])
+@require_auth
+def add_to_portfolio():
+    try:
+        user_id = request.user["sub"]
+        data = request.get_json()
+        conn = get_conn()
+        conn.execute("""
+            INSERT INTO portfolio
+            (user_id, title, artist, medium, decade, width_cm, height_cm,
+             wiki_url, estimated_price_usd, confidence_low, confidence_high, artist_score, notes)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            user_id,
+            data.get("title"), data.get("artist"), data.get("medium"),
+            data.get("decade"), data.get("width_cm"), data.get("height_cm"),
+            data.get("wiki_url"), data.get("estimated_price_usd"),
+            data.get("confidence_low"), data.get("confidence_high"),
+            data.get("artist_score"), data.get("notes", "")
+        ))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/portfolio/<int:item_id>", methods=["DELETE"])
+@require_auth
+def delete_portfolio_item(item_id):
+    try:
+        user_id = request.user["sub"]
+        conn = get_conn()
+        conn.execute("DELETE FROM portfolio WHERE id=? AND user_id=?", (item_id, user_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/health", methods=["GET"])
