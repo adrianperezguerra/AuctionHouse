@@ -563,6 +563,59 @@ def artist_timeline():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route("/api/artist-map", methods=["POST"])
+@require_auth
+def artist_map():
+    try:
+        data = request.get_json()
+        artist_name = data.get("artist", "")
+        score_band = data.get("score_band", 5)
+        conn = get_auction_conn()
+
+        # Get the target artist
+        target = conn.execute("""
+            SELECT ar.name, ar.score, ar.score_band,
+                   AVG(aw.sale_price_usd) as avg_price,
+                   COUNT(aw.id) as sales
+            FROM artists ar
+            LEFT JOIN artworks aw ON aw.artist_id = ar.id AND aw.sale_price_usd > 0
+            WHERE ar.name LIKE ?
+            GROUP BY ar.id
+            LIMIT 1
+        """, (f"%{artist_name}%",)).fetchone()
+
+        # Get comparable artists in nearby bands
+        peers = conn.execute("""
+            SELECT ar.name, ar.score, ar.score_band,
+                   AVG(aw.sale_price_usd) as avg_price,
+                   COUNT(aw.id) as sales
+            FROM artists ar
+            JOIN artworks aw ON aw.artist_id = ar.id
+            WHERE aw.sale_price_usd > 0
+              AND aw.sale_price_usd < 2000000000
+              AND ar.score_band BETWEEN ? AND ?
+              AND ar.name NOT LIKE ?
+            GROUP BY ar.id
+            HAVING COUNT(aw.id) >= 2
+            ORDER BY RANDOM()
+            LIMIT 30
+        """, (
+            max(1, score_band - 1),
+            min(9, score_band + 1),
+            f"%{artist_name}%"
+        )).fetchall()
+
+        conn.close()
+
+        result = {
+            "target": dict(target) if target else None,
+            "peers": [dict(p) for p in peers]
+        }
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})

@@ -476,6 +476,33 @@ min-width:0;box-sizing:border-box;
     transform: translateX(-50%);
     z-index: 10;
 }
+
+.artist-map-wrap {
+    margin-top: 32px;
+    padding-top: 28px;
+    border-top: 1px solid var(--dust);
+}
+.artist-map-title {
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 16px;
+}
+.artist-map-tooltip {
+    position: absolute;
+    background: var(--ink);
+    color: var(--parchment);
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    padding: 6px 12px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+    z-index: 10;
+}
 </style>
 </head>
 <body>
@@ -949,6 +976,13 @@ function renderResult(d) {
 
   document.getElementById("divider").classList.add("visible");
     // Append Monte Carlo chart
+    const artistMapHtml = `
+        <div class="artist-map-wrap">
+            <div class="artist-map-title">Comparable Artists — Fame vs Price</div>
+            <div id="artist-map-wrap"></div>
+        </div>
+    `;
+    document.getElementById("result").innerHTML += artistMapHtml;
     const timelineHtml = `
         <div class="timeline-wrap">
             <div class="timeline-title">Artist Price Timeline</div>
@@ -989,6 +1023,7 @@ function renderResult(d) {
         runMonteCarlo(d.estimated_price_usd, d.model_info.model_mae_usd || d.estimated_price_usd * 0.4);
         loadComparables(d.model_info.score_band, d.artwork.medium, d.artwork.decade, d.artwork.title);
         loadArtistTimeline(d.artwork.artist);
+        loadArtistMap(d.artwork.artist, d.model_info.score_band);
     }, 200);
   });
 }
@@ -1692,6 +1727,103 @@ async function loadArtistTimeline(artistName) {
 
     } catch(e) {
         wrap.innerHTML = '<div class="comp-loading">Could not load timeline.</div>';
+    }
+}
+
+
+async function loadArtistMap(artistName, scoreBand) {
+    const wrap = document.getElementById("artist-map-wrap");
+    if (!wrap) return;
+    wrap.innerHTML = '<div class="comp-loading">Loading artist map...</div>';
+
+    try {
+        const r = await apiFetch("/api/artist-map", "POST", {
+            artist: artistName, score_band: scoreBand
+        });
+        const data = await r.json();
+
+        if (!data.peers || data.peers.length < 3) {
+            wrap.innerHTML = '<div class="comp-loading">Not enough peer data for map.</div>';
+            return;
+        }
+
+        const all = [...data.peers];
+        if (data.target) all.push({...data.target, isTarget: true});
+
+        const W = 600, H = 200, PAD = 40;
+        const scores = all.map(a => a.score || 5);
+        const prices = all.map(a => a.avg_price || 0);
+        const minScore = Math.min(...scores);
+        const maxScore = Math.max(...scores);
+        const maxPrice = Math.max(...prices);
+
+        const toX = s => PAD + ((s - minScore) / (maxScore - minScore || 1)) * (W - PAD * 2);
+        const toY = p => H - PAD - (p / (maxPrice || 1)) * (H - PAD * 2);
+
+        const dots = all.map(a => {
+            const isT = a.isTarget;
+            const x = toX(a.score || 5);
+            const y = toY(a.avg_price || 0);
+            return `<circle
+                cx="${x}" cy="${y}" r="${isT ? 7 : 4}"
+                fill="${isT ? "var(--gold)" : "rgba(100,80,60,0.4)"}"
+                stroke="${isT ? "var(--ink)" : "none"}"
+                stroke-width="1.5"
+                class="map-dot"
+                data-name="${a.name}"
+                data-score="${(a.score||0).toFixed(1)}"
+                data-price="${a.avg_price || 0}"
+                style="cursor:pointer"
+            />`;
+        }).join("");
+
+        // Axis labels
+        const xLabels = `
+            <text x="${PAD}" y="${H - 8}" font-family="monospace" font-size="9" fill="#9a8e80">Low Fame</text>
+            <text x="${W - PAD - 50}" y="${H - 8}" font-family="monospace" font-size="9" fill="#9a8e80">High Fame</text>
+        `;
+        const yLabels = `
+            <text x="4" y="${H - PAD}" font-family="monospace" font-size="9" fill="#9a8e80" transform="rotate(-90,4,${H-PAD})">Low $</text>
+            <text x="4" y="${PAD + 20}" font-family="monospace" font-size="9" fill="#9a8e80" transform="rotate(-90,4,${PAD+20})">High $</text>
+        `;
+
+        // Grid lines
+        const grid = `
+            <line x1="${PAD}" y1="${PAD}" x2="${PAD}" y2="${H-PAD}" stroke="var(--dust)" stroke-width="1"/>
+            <line x1="${PAD}" y1="${H-PAD}" x2="${W-PAD}" y2="${H-PAD}" stroke="var(--dust)" stroke-width="1"/>
+        `;
+
+        // Target label
+        let targetLabel = "";
+        if (data.target) {
+            const tx = toX(data.target.score || 5);
+            const ty = toY(data.target.avg_price || 0);
+            targetLabel = `<text x="${tx + 10}" y="${ty - 5}" font-family="serif" font-size="10" fill="var(--ink)" font-style="italic">${data.target.name}</text>`;
+        }
+
+        wrap.innerHTML = `
+            <div style="position:relative">
+                <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;overflow:visible">
+                    ${grid}${xLabels}${yLabels}${dots}${targetLabel}
+                </svg>
+                <div class="artist-map-tooltip" id="map-tooltip"></div>
+            </div>
+        `;
+
+        const tooltip = document.getElementById("map-tooltip");
+        wrap.querySelectorAll(".map-dot").forEach(dot => {
+            dot.addEventListener("mouseenter", (e) => {
+                const rect = wrap.getBoundingClientRect();
+                tooltip.style.opacity = "1";
+                tooltip.style.left = (e.clientX - rect.left + 10) + "px";
+                tooltip.style.top = (e.clientY - rect.top - 30) + "px";
+                tooltip.textContent = `${dot.dataset.name} — score ${dot.dataset.score} — avg ${fmt(parseFloat(dot.dataset.price))}`;
+            });
+            dot.addEventListener("mouseleave", () => { tooltip.style.opacity = "0"; });
+        });
+
+    } catch(e) {
+        wrap.innerHTML = '<div class="comp-loading">Could not load artist map.</div>';
     }
 }
 
