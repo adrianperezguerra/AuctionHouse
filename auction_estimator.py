@@ -827,43 +827,46 @@ def find_nearest_model_band(target: int) -> Optional[int]:
 
 
 def get_gemini_appraisal(title: str, artist: str) -> None:
-    """Ask Gemini for expert appraisal estimate of an artwork. Returns USD float or None."""
+    """Ask Gemini to research and appraise an artwork. Returns (low, high, mid) or None."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        log.warning("GEMINI_API_KEY not set — skipping Gemini appraisal")
         return None
     try:
         prompt = (
-            f"What is the current expert appraisal range for the artwork "
-            f"\"{title}\" by {artist}? "
-            f"Reply with ONLY two numbers separated by a hyphen, representing the low and high "
-            f"end of the expert appraisal range in USD with no symbols or commas. "
-            f"Example: 45000000-120000000 "
-            f"If unknown, reply with: unknown"
+            f'You are an expert art appraiser. Research the artwork "{title}" by {artist}. '
+            f'Search your knowledge for: recent auction results, expert appraisals, '
+            f'insurance valuations, and market comparables for this specific work. '
+            f'Based on all available information, what is your best estimate of its '
+            f'current auction value in USD? '
+            f'Reply ONLY as JSON: '
+            f'{{"low": 50000000, "high": 80000000, "mid": 65000000, '
+            f'"reasoning": "brief explanation"}} '
+            f'If you cannot find enough information reply: {{"low": null, "high": null, "mid": null, "reasoning": "insufficient data"}}'
         )
         r = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
             headers={"Content-Type": "application/json"},
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=15,
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "tools": [{"google_search": {}}]
+            },
+            timeout=20,
         )
         r.raise_for_status()
         text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        log.info(f"  Gemini appraisal response: '{text}'")
-        if text.lower() == "unknown" or not text:
-            return None
-        # Parse range like "45000000-120000000" or single value
-        nums = re.findall(r"[\d]+", text.replace(",", "").replace(".", ""))
-        if len(nums) >= 2:
-            low, high = float(nums[0]), float(nums[1])
-            if 1_000 <= low <= 10_000_000_000 and 1_000 <= high <= 10_000_000_000:
-                mid = (low + high) / 2
-                log.info(f"  Gemini range: ${low:,.0f} — ${high:,.0f} (mid=${mid:,.0f})")
-                return (low, high, mid)
-        elif len(nums) == 1:
-            val = float(nums[0])
-            if 1_000 <= val <= 10_000_000_000:
-                return (val * 0.7, val * 1.3, val)
+        log.info(f"  Gemini research response: {text[:200]}")
+        match = re.search(r'\{.*?\}', text, re.DOTALL)
+        if match:
+            import json as _json
+            data = _json.loads(match.group())
+            low = data.get("low")
+            high = data.get("high")
+            mid = data.get("mid")
+            reasoning = data.get("reasoning", "")
+            if low and high and mid:
+                log.info(f"  Gemini appraisal: ${low:,.0f} — ${high:,.0f} (mid=${mid:,.0f})")
+                log.info(f"  Gemini reasoning: {reasoning}")
+                return (float(low), float(high), float(mid))
     except Exception as e:
         if "429" in str(e):
             log.warning("Gemini rate limited — please wait a minute and try again")
@@ -991,6 +994,7 @@ def predict_price(
     depth_cm: Optional[float],
     artist_id: Optional[int] = None,
     artwork_title: Optional[str] = None,
+    artist_name: Optional[str] = None,
 ) -> dict:
     # Try artist-level median prediction first
     # Score the painting itself on Wikipedia
@@ -998,7 +1002,7 @@ def predict_price(
     artwork_wiki_result = artwork_wiki_result if isinstance(artwork_wiki_result, tuple) else (artwork_wiki_result, 0)
     artwork_wiki_multiplier = artwork_wiki_result[0]
     artwork_pageviews = artwork_wiki_result[1]
-    gemini_price = get_gemini_appraisal(artwork_title or "", "") if artwork_title else None
+    gemini_price = get_gemini_appraisal(artwork_title or "", artist_name or "") if artwork_title else None
     median_price = get_artist_median_price(artist_id)
     median_count = len(get_conn().execute("SELECT id FROM artworks WHERE artist_id=? AND sale_price_usd > 0", (artist_id,)).fetchall()) if artist_id else 0
     if median_price is not None:
@@ -1016,24 +1020,21 @@ def predict_price(
             adjusted = min(adjusted * combined_multiplier, 5_000_000_000)
         else:
             adjusted = min(adjusted, 5_000_000_000)
-        # Gemini override logic
+        # Gemini is primary — model is cross-check
         if gemini_price and isinstance(gemini_price, tuple):
             g_low, g_high, g_mid = gemini_price
-            log.info(f"  Gemini appraisal: ${g_low:,.0f} — ${g_high:,.0f}")
-            # Check if our estimate is outside Gemini range by >15%
-            tolerance = 0.15
-            below = adjusted < g_low * (1 - tolerance)
-            above = adjusted > g_high * (1 + tolerance)
-            if below or above:
-                log.info(f"  Estimate ${adjusted:,.0f} outside Gemini range — overriding with Gemini mid ${g_mid:,.0f}")
-                adjusted = g_mid
-            else:
-                # Blend 40% Gemini, 60% our estimate
-                adjusted = adjusted * 0.6 + g_mid * 0.4
-                log.info(f"  Blended with Gemini: ${adjusted:,.0f}")
-            adjusted = min(adjusted * combined_multiplier, 5_000_000_000)
-        else:
-            adjusted = min(adjusted, 5_000_000_000)
+            log.info(f"  Gemini primary: ${g_mid:,.0f} | Model: ${adjusted:,.0f}")
+            # Check how far apart they are (as % of Gemini value)
+            if g_mid > 0:
+                pct_diff = abs(adjusted - g_mid) / g_mid
+                if pct_diff <= 0.30:
+                    # Within 30% — blend 60% Gemini, 40% model
+                    adjusted = g_mid * 0.6 + adjusted * 0.4
+                    log.info(f"  Within 30% — blended: ${adjusted:,.0f}")
+                else:
+                    # More than 30% apart — trust Gemini
+                    adjusted = g_mid
+                    log.info(f"  Diverged {pct_diff:.0%} — using Gemini: ${adjusted:,.0f}")
         mae = adjusted * 0.4  # 40% confidence interval for median-based prediction
         band = max(1, min(9, int(artist_score)))
         conn = get_conn()
@@ -1179,6 +1180,7 @@ def estimate_from_url(url: str) -> dict:
         depth_cm     = artwork["depth_cm"],
         artist_id    = artist.get("id"),
         artwork_title = artwork["title"],
+        artist_name = artist.get("name", "") if isinstance(artist, dict) else "",
     )
 
     # 5. Assemble full output
