@@ -616,6 +616,73 @@ def artist_map():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route("/api/batch-estimate", methods=["POST"])
+@require_auth
+def batch_estimate():
+    try:
+        import csv, io as _io
+        from auction_estimator import estimate_from_url
+
+        data = request.get_json()
+        urls = data.get("urls", [])
+        if not urls:
+            return jsonify({"error": "No URLs provided"}), 400
+        if len(urls) > 50:
+            return jsonify({"error": "Max 50 URLs per batch"}), 400
+
+        results = []
+        for url in urls:
+            url = url.strip()
+            if not url:
+                continue
+            try:
+                result = estimate_from_url(url)
+                results.append({
+                    "url": url,
+                    "title": result["artwork"]["title"],
+                    "artist": result["artwork"]["artist"],
+                    "medium": result["artwork"]["medium"],
+                    "decade": result["artwork"]["decade"],
+                    "estimated_price_usd": result["estimated_price_usd"],
+                    "confidence_low": result["confidence_interval"][0],
+                    "confidence_high": result["confidence_interval"][1],
+                    "artist_score": result["artist_score"],
+                    "museum_class": result["museum_class"],
+                    "error": None,
+                })
+            except Exception as e:
+                results.append({
+                    "url": url,
+                    "title": None, "artist": None, "medium": None,
+                    "decade": None, "estimated_price_usd": None,
+                    "confidence_low": None, "confidence_high": None,
+                    "artist_score": None, "museum_class": False,
+                    "error": str(e),
+                })
+
+        # Build CSV
+        out = _io.StringIO()
+        writer = csv.DictWriter(out, fieldnames=[
+            "title", "artist", "medium", "decade",
+            "estimated_price_usd", "confidence_low", "confidence_high",
+            "artist_score", "museum_class", "url", "error"
+        ])
+        writer.writeheader()
+        writer.writerows(results)
+        csv_bytes = out.getvalue().encode("utf-8")
+
+        from flask import Response
+        return Response(
+            csv_bytes,
+            mimetype="text/csv",
+            headers={"Content-Disposition": "attachment; filename=auctionhouse_batch.csv"}
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})

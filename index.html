@@ -503,6 +503,50 @@ min-width:0;box-sizing:border-box;
     white-space: nowrap;
     z-index: 10;
 }
+
+.batch-wrap { max-width: 780px; margin: 0 auto; padding: 40px 24px; }
+.batch-textarea {
+    width: 100%;
+    height: 180px;
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    padding: 16px;
+    border: 1px solid var(--dust);
+    background: var(--cream);
+    color: var(--ink);
+    resize: vertical;
+    box-sizing: border-box;
+    margin-bottom: 16px;
+}
+.batch-textarea:focus { outline: none; border-color: #c8b89a; }
+.batch-submit {
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding: 14px;
+    background: var(--ink);
+    color: var(--parchment);
+    border: none;
+    cursor: pointer;
+}
+.batch-submit:hover { background: #2a2a2a; }
+.batch-submit:disabled { background: #888; cursor: not-allowed; }
+.batch-status {
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    color: #9a8e80;
+    margin-top: 16px;
+    text-align: center;
+}
+.batch-note {
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    color: #9a8e80;
+    margin-bottom: 20px;
+    line-height: 1.6;
+}
 </style>
 </head>
 <body>
@@ -1825,6 +1869,48 @@ async function loadArtistMap(artistName, scoreBand) {
     } catch(e) {
         wrap.innerHTML = '<div class="comp-loading">Could not load artist map.</div>';
     }
+}
+
+
+async function runBatch() {
+    const raw = document.getElementById("batch-urls").value.trim();
+    if (!raw) return;
+    const urls = raw.split("\n").map(u => u.trim()).filter(u => u.startsWith("http"));
+    if (urls.length === 0) {
+        document.getElementById("batch-status").textContent = "No valid URLs found.";
+        return;
+    }
+    if (urls.length > 50) {
+        document.getElementById("batch-status").textContent = "Max 50 URLs. Please trim your list.";
+        return;
+    }
+
+    const btn = document.getElementById("batch-btn");
+    const status = document.getElementById("batch-status");
+    btn.disabled = true;
+    btn.textContent = "RUNNING...";
+    status.textContent = `Processing ${urls.length} artworks — this may take a few minutes...`;
+
+    try {
+        const r = await apiFetch("/api/batch-estimate", "POST", { urls });
+        if (!r.ok) {
+            const err = await r.json();
+            throw new Error(err.error || "Batch failed");
+        }
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "auctionhouse_batch.csv";
+        a.click();
+        URL.revokeObjectURL(url);
+        status.textContent = `Done — ${urls.length} artworks estimated. CSV downloaded.`;
+    } catch(e) {
+        status.textContent = "Error: " + e.message;
+    }
+
+    btn.disabled = false;
+    btn.textContent = "RUN BATCH ESTIMATE";
 }
 
 </script>
