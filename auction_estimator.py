@@ -138,6 +138,10 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+# Cache Gemini results to avoid repeat API calls
+_gemini_cache: dict = {}
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATABASE
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -890,6 +894,10 @@ def get_gemini_appraisal(title: str, artist: str) -> None:
 
 def get_gemini_full_evaluation(title: str, artist: str) -> dict:
     """Single Gemini call that returns both appraisal and provenance. Saves rate limit quota."""
+    cache_key = f"{title}::{artist}"
+    if cache_key in _gemini_cache:
+        log.info("  Gemini cache hit")
+        return _gemini_cache[cache_key]
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return {"appraisal": None, "provenance_multiplier": 1.0, "provenance_reasons": []}
@@ -927,7 +935,9 @@ def get_gemini_full_evaluation(title: str, artist: str) -> dict:
             prov_mult = max(1.0, min(2.5, float(data.get("provenance_multiplier", 1.0))))
             prov_reasons = data.get("provenance_reasons", [])
             log.info(f"  Gemini appraisal: {appraisal} provenance: {prov_mult:.2f}x {prov_reasons}")
-            return {"appraisal": appraisal, "provenance_multiplier": prov_mult, "provenance_reasons": prov_reasons}
+            result = {"appraisal": appraisal, "provenance_multiplier": prov_mult, "provenance_reasons": prov_reasons}
+            _gemini_cache[cache_key] = result
+            return result
     except Exception as e:
         if "429" in str(e):
             log.warning("Gemini rate limited — please wait a minute and try again")
