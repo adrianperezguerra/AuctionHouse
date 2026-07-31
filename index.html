@@ -1024,13 +1024,7 @@ function renderResult(d) {
 
   document.getElementById("divider").classList.add("visible");
     // Append Monte Carlo chart
-    const artistMapHtml = `
-        <div class="artist-map-wrap">
-            <div class="artist-map-title">Comparable Artists — Fame vs Price</div>
-            <div id="artist-map-wrap"></div>
-        </div>
-    `;
-    document.getElementById("result").innerHTML += artistMapHtml;
+
     const timelineHtml = `
         <div class="timeline-wrap">
             <div class="timeline-title">Artist Price Timeline</div>
@@ -1071,7 +1065,6 @@ function renderResult(d) {
         runMonteCarlo(d.estimated_price_usd, d.model_info.model_mae_usd || d.estimated_price_usd * 0.4);
         loadComparables(d.model_info.score_band, d.artwork.medium, d.artwork.decade, d.artwork.title);
         loadArtistTimeline(d.artwork.artist);
-        loadArtistMap(d.artwork.artist, d.model_info.score_band);
     }, 200);
   });
 }
