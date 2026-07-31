@@ -28,7 +28,14 @@
       --mono:       'DM Mono', monospace;
     }
 
-    html, body { min-height: 100vh; background: var(--parchment); color: var(--ink); font-family: var(--serif); font-size: 18px; line-height: 1.6; }
+    html, * {
+    font-family: "Times New Roman", Times, serif !important;
+    color: #1a1a18 !important;
+}
+nav, nav *, .nav, .nav * {
+    font-family: var(--mono) !important;
+}
+body { min-height: 100vh; background: var(--parchment); color: var(--ink); font-family: var(--serif); font-size: 18px; line-height: 1.6; }
 
     /* top border */
     body::after { content: ''; display: block; position: fixed; top: 0; left: 0; right: 0; height: 2px; background: var(--gold); z-index: 100; }
