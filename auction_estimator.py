@@ -869,52 +869,71 @@ def get_gemini_appraisal(title: str, artist: str) -> None:
                 return (float(low), float(high), float(mid))
     except Exception as e:
         if "429" in str(e):
-            log.warning("Gemini rate limited — please wait a minute and try again")
+            log.warning("Gemini rate limited — retrying in 10s")
+            time.sleep(10)
+            try:
+                r = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+                    headers={"Content-Type": "application/json"},
+                    json={"contents": [{"parts": [{"text": prompt}]}], "tools": [{"google_search": {}}]},
+                    timeout=20,
+                )
+                r.raise_for_status()
+                text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            except Exception:
+                log.warning("Gemini still rate limited — skipping")
+                return None
         else:
             log.warning(f"Gemini appraisal failed: {e}")
     return None
 
 
-def get_provenance_boost(title: str, artist: str) -> tuple:
-    """Ask Gemini about provenance signals. Returns (multiplier, reasons)"""
+def get_gemini_full_evaluation(title: str, artist: str) -> dict:
+    """Single Gemini call that returns both appraisal and provenance. Saves rate limit quota."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        return 1.0, []
+        return {"appraisal": None, "provenance_multiplier": 1.0, "provenance_reasons": []}
     try:
         prompt = (
-            f'For the artwork "{title}" by {artist}, list any notable provenance signals '
-            f'that would increase its auction value. Consider: famous previous owners '
-            f'(Rockefeller, Rothschild, Royal collections etc), major museum history, '
-            f'prestigious auction house sales, notable exhibitions. '
-            f'Reply ONLY as a JSON object like: '
-            f'{{"multiplier": 1.2, "reasons": ["Rockefeller collection", "MoMA exhibition"]}} '
-            f'Use multiplier 1.0 if no notable provenance, max 2.5 for exceptional provenance. '
-            f'If unknown reply: {{"multiplier": 1.0, "reasons": []}}'
+            f'You are an expert art appraiser and historian. Research the artwork "{title}" by {artist}. '
+            f'Find: auction results, expert appraisals, insurance valuations, notable provenance. '
+            f'Reply ONLY as JSON: '
+            f'{{"appraisal_low": 50000000, "appraisal_high": 80000000, "appraisal_mid": 65000000, '
+            f'"provenance_multiplier": 1.2, "provenance_reasons": ["Rockefeller collection"], '
+            f'"reasoning": "brief explanation"}} '
+            f'provenance_multiplier should be 1.0 (no notable provenance) to 2.5 (exceptional). '
+            f'If appraisal unknown use null for appraisal fields.'
         )
         r = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
             headers={"Content-Type": "application/json"},
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=15,
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "tools": [{"google_search": {}}]
+            },
+            timeout=25,
         )
         r.raise_for_status()
         text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        import json as json_mod
-        match = re.search(r"{.*}", text, re.DOTALL)
+        log.info(f"  Gemini full eval: {text[:300]}")
+        match = re.search(r'\{.*?\}', text, re.DOTALL)
         if match:
-            data = json_mod.loads(match.group())
-            multiplier = float(data.get("multiplier", 1.0))
-            reasons = data.get("reasons", [])
-            multiplier = max(1.0, min(2.5, multiplier))
-            if multiplier > 1.0:
-                log.info(f"  Gemini provenance: {multiplier:.2f}x — {reasons}")
-            return multiplier, reasons
+            import json as _json
+            data = _json.loads(match.group())
+            low = data.get("appraisal_low")
+            high = data.get("appraisal_high")
+            mid = data.get("appraisal_mid")
+            appraisal = (float(low), float(high), float(mid)) if low and high and mid else None
+            prov_mult = max(1.0, min(2.5, float(data.get("provenance_multiplier", 1.0))))
+            prov_reasons = data.get("provenance_reasons", [])
+            log.info(f"  Gemini appraisal: {appraisal} provenance: {prov_mult:.2f}x {prov_reasons}")
+            return {"appraisal": appraisal, "provenance_multiplier": prov_mult, "provenance_reasons": prov_reasons}
     except Exception as e:
         if "429" in str(e):
-            log.warning("Gemini provenance rate limited — skipping")
+            log.warning("Gemini rate limited — please wait a minute and try again")
         else:
-            log.warning(f"Gemini provenance failed: {e}")
-    return 1.0, []
+            log.warning(f"Gemini evaluation failed: {e}")
+    return {"appraisal": None, "provenance_multiplier": 1.0, "provenance_reasons": []}
 
 
 def get_artwork_wikipedia_score(title: str) -> tuple:
@@ -995,6 +1014,7 @@ def predict_price(
     artist_id: Optional[int] = None,
     artwork_title: Optional[str] = None,
     artist_name: Optional[str] = None,
+    gemini_appraisal_cache = None,
 ) -> dict:
     # Try artist-level median prediction first
     # Score the painting itself on Wikipedia
@@ -1002,7 +1022,7 @@ def predict_price(
     artwork_wiki_result = artwork_wiki_result if isinstance(artwork_wiki_result, tuple) else (artwork_wiki_result, 0)
     artwork_wiki_multiplier = artwork_wiki_result[0]
     artwork_pageviews = artwork_wiki_result[1]
-    gemini_price = get_gemini_appraisal(artwork_title or "", artist_name or "") if artwork_title else None
+    gemini_price = gemini_appraisal_cache
     median_price = get_artist_median_price(artist_id)
     median_count = len(get_conn().execute("SELECT id FROM artworks WHERE artist_id=? AND sale_price_usd > 0", (artist_id,)).fetchall()) if artist_id else 0
     if median_price is not None:
@@ -1181,6 +1201,7 @@ def estimate_from_url(url: str) -> dict:
         artist_id    = artist.get("id"),
         artwork_title = artwork["title"],
         artist_name = artist.get("name", "") if isinstance(artist, dict) else "",
+        gemini_appraisal_cache = _gemini_appraisal_cache,
     )
 
     # 5. Assemble full output
