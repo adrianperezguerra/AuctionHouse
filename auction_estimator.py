@@ -1201,6 +1201,15 @@ def estimate_from_url(url: str) -> dict:
             artwork.get("wikidata_qid"),
         )
 
+    # Gemini full evaluation (appraisal + provenance in one call)
+    gemini_eval = get_gemini_full_evaluation(
+        artwork["title"],
+        artist.get("name", "") if isinstance(artist, dict) else ""
+    )
+    provenance_multiplier = gemini_eval["provenance_multiplier"]
+    provenance_reasons = gemini_eval["provenance_reasons"]
+    _gemini_appraisal_cache = gemini_eval["appraisal"]
+
     # 4. Predict
     result = predict_price(
         artist_score = artist["score"],
