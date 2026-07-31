@@ -847,6 +847,7 @@ def get_gemini_appraisal(title: str, artist: str) -> None:
             f'"reasoning": "brief explanation"}} '
             f'If you cannot find enough information reply: {{"low": null, "high": null, "mid": null, "reasoning": "insufficient data"}}'
         )
+        time.sleep(2)  # Pace requests to stay under free tier limit
         r = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
             headers={"Content-Type": "application/json"},
