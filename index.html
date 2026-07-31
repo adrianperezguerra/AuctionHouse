@@ -246,8 +246,8 @@ min-width:0;box-sizing:border-box;
 }
 .monte-title {
     font-family: var(--mono);
-    font-size: 0.58rem;
-    letter-spacing: 0.22em;
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--gold);
     margin-bottom: 16px;
@@ -288,8 +288,8 @@ min-width:0;box-sizing:border-box;
 }
 .comp-title {
     font-family: var(--mono);
-    font-size: 0.58rem;
-    letter-spacing: 0.22em;
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--gold);
     margin-bottom: 16px;
@@ -301,22 +301,23 @@ min-width:0;box-sizing:border-box;
 }
 .comp-table th {
     font-family: var(--mono);
-    font-size: 0.52rem;
-    letter-spacing: 0.15em;
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     color: #9a8e80;
     text-align: left;
-    padding: 6px 12px;
+    padding: 8px 14px;
     border-bottom: 1px solid var(--dust);
 }
 .comp-table td {
-    padding: 10px 12px;
+    padding: 12px 14px;
     border-bottom: 1px solid var(--dust);
     font-family: var(--serif);
+    font-size: 0.95rem;
     color: var(--ink);
 }
 .comp-table tr:last-child td { border-bottom: none; }
-.comp-table tr:hover td { background: var(--cream); }
+.comp-table tr:hover td { background: #faf7f2; transition: background 0.15s; }
 .comp-price {
     font-family: var(--mono);
     font-size: 0.75rem;
@@ -325,9 +326,9 @@ min-width:0;box-sizing:border-box;
 }
 .comp-loading {
     font-family: var(--mono);
-    font-size: 0.62rem;
+    font-size: 0.82rem;
     color: #9a8e80;
-    padding: 12px 0;
+    padding: 16px 0;
 }
 
 .portfolio-wrap { max-width: 780px; margin: 0 auto; padding: 40px 24px; }
@@ -451,8 +452,8 @@ min-width:0;box-sizing:border-box;
 }
 .timeline-title {
     font-family: var(--mono);
-    font-size: 0.58rem;
-    letter-spacing: 0.22em;
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--gold);
     margin-bottom: 16px;
@@ -553,6 +554,45 @@ min-width:0;box-sizing:border-box;
     color: #9a8e80;
     margin-bottom: 20px;
     line-height: 1.6;
+}
+
+.prov-wrap {
+    margin-top: 32px;
+    padding-top: 28px;
+    border-top: 1px solid var(--dust);
+}
+.prov-title {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 12px;
+}
+.prov-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: #7a6a30;
+    background: #faf5e4;
+    border: 1px solid #e8d88a;
+    padding: 4px 10px;
+    margin: 3px;
+}
+.prov-dot {
+    width: 5px;
+    height: 5px;
+    background: #B8922A;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.prov-multiplier {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: #9a8e80;
+    margin-top: 8px;
 }
 </style>
 </head>
@@ -1032,6 +1072,19 @@ function renderResult(d) {
         </div>
     `;
     document.getElementById("result").innerHTML += timelineHtml;
+    // Provenance signals
+    if (d.provenance_signals && d.provenance_signals.length > 0) {
+        const tags = d.provenance_signals.map(s =>
+            `<span class="prov-tag"><span class="prov-dot"></span>${s}</span>`
+        ).join("");
+        const provHtml = `
+            <div class="prov-wrap">
+                <div class="prov-title">Provenance Signals</div>
+                <div>${tags}</div>
+            </div>
+        `;
+        document.getElementById("result").innerHTML += provHtml;
+    }
     const compHtml = `
         <div class="comp-wrap" style="margin-top:32px;padding-top:28px;border-top:1px solid var(--dust)">
             <div class="comp-title">Comparable Sales</div>
@@ -1908,6 +1961,22 @@ async function runBatch() {
 
     btn.disabled = false;
     btn.textContent = "RUN BATCH ESTIMATE";
+}
+
+
+let manualImageB64 = null;
+
+function handleManualImageFile(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        manualImageB64 = e.target.result;
+        document.getElementById("manual-img-preview").src = manualImageB64;
+        document.getElementById("manual-img-preview-wrap").style.display = "block";
+        document.getElementById("manual-img-prompt").style.display = "none";
+    };
+    reader.readAsDataURL(file);
 }
 
 </script>
